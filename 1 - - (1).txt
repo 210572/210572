@@ -1,0 +1,10468 @@
+
+    1  
+    / *
+   
+
+    2  
+    * Este archivo es parte de FFmpeg.
+   
+
+    3  
+    *
+   
+
+    4  
+    * FFmpeg es un software gratuito; puedes redistribuirlo y / o
+   
+
+    5  
+    * modificarlo bajo los términos del GNU Lesser General Public
+   
+
+    6  
+    * Licencia publicada por la Free Software Foundation; cualquiera
+   
+
+    7  
+    * versión 2.1 de la Licencia, o (a su elección) cualquier versión posterior.
+   
+
+    8  
+    *
+   
+
+    9  
+    * FFmpeg se distribuye con la esperanza de que sea útil,
+   
+
+    10  
+    * pero SIN NINGUNA GARANTÍA; sin siquiera la garantía implícita de
+   
+
+    11  
+    * COMERCIABILIDAD o APTITUD PARA UN PROPÓSITO PARTICULAR. Ver el GNU
+   
+
+    12  
+    * Licencia pública general menor para obtener más detalles.
+   
+
+    13  
+    *
+   
+
+    14  
+    * Debería haber recibido una copia de GNU Lesser General Public
+   
+
+    15  
+    * Licencia junto con FFmpeg; si no, escriba al software libre
+   
+
+    16  
+    * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 EE. UU.
+   
+
+    17  
+    * /
+   
+
+     18 
+   
+
+    19  
+    # include  
+    "config.h"
+    
+   
+
+    20  
+    # include  
+    "pixdesc.h"
+    
+   
+
+    21  
+    # include  
+    "avstring.h"
+    
+   
+
+    22  
+    # include  
+    "imgutils.h"
+    
+   
+
+    23  
+    # include  
+    "hwcontext.h"
+    
+   
+
+    24  
+    #include  
+    "hwcontext_internal.h"
+    
+   
+
+    25  
+    #include  
+    "hwcontext_vulkan.h"
+    
+   
+
+     26 
+   
+
+    27  
+    #if CONFIG_LIBDRM
+   
+
+    28  
+    #include <unistd.h>
+   
+
+    29  
+    #include <xf86drm.h>
+   
+
+    30  
+    #include <drm_fourcc.h>
+   
+
+    31  
+    # include  
+    "hwcontext_drm.h"
+    
+   
+
+    32  
+    #if CONFIG_VAAPI
+   
+
+    33  
+    #incluir <va / va_drmcommon.h>
+   
+
+    34  
+    #include  
+    "hwcontext_vaapi.h"
+    
+   
+
+    35  
+    #endif
+   
+
+    36  
+    #endif
+   
+
+     37 
+   
+
+    38  
+    #if CONFIG_CUDA
+   
+
+    39  
+    #include  
+    "hwcontext_cuda_internal.h"
+    
+   
+
+    40  
+    # include  
+    "cuda_check.h"
+    
+   
+
+    41  
+    #define CHECK_CU (x) FF_CUDA_CHECK_DL (cuda_cu, cu, x)
+   
+
+    42  
+    #endif
+   
+
+     43 
+   
+
+    44  
+    typedef  
+    struct VulkanExecCtx 
+     {
+   
+
+    45 VkCommandPool pool
+     ;
+   
+
+    46 VkCommandBuffer buf
+     ;
+   
+
+    47 cola de VkQueue
+     ;
+   
+
+    Valla de 48 VkFence
+     ;
+   
+
+    49  
+    } VulkanExecCtx
+     ;
+   
+
+     50 
+   
+
+    51  
+    typedef  
+    struct VulkanDevicePriv 
+     {
+   
+
+    52  
+    / * Propiedades * /
+   
+
+    53 accesorios de VkPhysicalDeviceProperties
+     ;
+   
+
+    54 VkPhysicalDeviceMemoryProperties mprops
+     ;
+   
+
+     55 
+   
+
+    56  
+    / * Colas * /
+   
+
+    57  
+    uint32_t qfs
+     [ 
+    3 
+    ];
+   
+
+    58  
+    int num_qfs
+     ;
+   
+
+     59 
+   
+
+    60  
+    / * Devolución de llamada de depuración * /
+   
+
+    61 VkDebugUtilsMessengerEXT debug_ctx
+     ;
+   
+
+     62 
+   
+
+    63  
+    / * Carga de imágenes * /
+   
+
+    64 VulkanExecCtx cmd
+     ;
+   
+
+     sesenta y cinco 
+   
+
+    66  
+    / * Extensiones * /
+   
+
+    67 
+     extensiones
+     uint64_t ;
+   
+
+     68 
+   
+
+    69  
+    / * Configuración * /
+   
+
+    70  
+    int use_linear_images
+     ;
+   
+
+     71 
+   
+
+    72  
+    / * Nvidia * /
+   
+
+    73  
+    int dev_is_nvidia
+     ;
+   
+
+    74  
+    } VulkanDevicePriv
+     ;
+   
+
+     75 
+   
+
+    76  
+    typedef  
+    struct VulkanFramesPriv 
+     {
+   
+
+    77 VulkanExecCtx cmd
+     ;
+   
+
+    78  
+    } VulkanFramesPriv
+     ;
+   
+
+     79 
+   
+
+    80  
+    typedef  
+    struct AVVkFrameInternal 
+     {
+   
+
+    81  
+    #if CONFIG_CUDA
+   
+
+    82  
+    / * Importar memoria externa a cuda es muy caro, por lo que mantenemos el
+   
+
+    83  
+    * memoria importada todo el tiempo * /
+   
+
+    84 AVBufferRef 
+     * cuda_fc_ref
+     ;  
+    / * Necesito tenerlo cerca para uninit * /
+   
+
+    85 CUexternalMemory ext_mem
+     [ AV_NUM_DATA_POINTERS
+     ];
+   
+
+    86 CUmipmappedArray cu_mma
+     [ AV_NUM_DATA_POINTERS
+     ];
+   
+
+    87 CUarray cu_array
+     [ AV_NUM_DATA_POINTERS
+     ];
+   
+
+    88 CUexternalSemaphore cu_sem
+     ;
+   
+
+    89  
+    #endif
+   
+
+    90  
+    } AVVkFrameInternal
+     ;
+   
+
+     91 
+   
+
+    92  
+    #define VK_LOAD_PFN (inst, name) PFN _ ## name pfn _ ## name = (PFN _ ## name) \
+   
+
+    93  
+    vkGetInstanceProcAddr (inst, #nombre)
+   
+
+     94 
+   
+
+    95  
+    #define DEFAULT_USAGE_FLAGS (VK_IMAGE_USAGE_SAMPLED_BIT | \
+   
+
+    96  
+    VK_IMAGE_USAGE_STORAGE_BIT | \
+   
+
+    97  
+    VK_IMAGE_USAGE_TRANSFER_SRC_BIT | \
+   
+
+    98  
+    VK_IMAGE_USAGE_TRANSFER_DST_BIT)
+   
+
+     99 
+   
+
+    100  
+    #define ADD_VAL_TO_LIST (lista, recuento, val) \
+   
+
+    101  
+    hacer {\
+   
+
+    102  
+    lista = av_realloc_array (lista, tamaño de (* lista), ++ recuento); \
+   
+
+    103  
+    si (! Lista) {\
+   
+
+    104  
+    err = AVERROR (ENOMEM); \
+   
+
+    105  
+    ir a fallar; \
+   
+
+    106  
+    } \
+   
+
+    107  
+    lista [cuenta - 1] = av_strdup (val); \
+   
+
+    108  
+    if (! List [count - 1]) {\
+   
+
+    109  
+    err = AVERROR (ENOMEM); \
+   
+
+    110  
+    ir a fallar; \
+   
+
+    111  
+    } \
+   
+
+    112  
+    } mientras (0)
+   
+
+     113 
+   
+
+    114  
+    estructura const estática  
+    {
+   
+
+    115  
+    enumeración AVPixelFormat pixfmt
+     ;
+   
+
+    116  
+    const VkFormat vkfmts
+     [ 
+    3 
+    ];
+   
+
+    117  
+    } vk_pixfmt_map
+     [] = {
+   
+
+    118  
+    { AV_PIX_FMT_GRAY8
+     , { VK_FORMAT_R8_UNORM 
+     }},
+   
+
+    119  
+    { AV_PIX_FMT_GRAY16
+     , { VK_FORMAT_R16_UNORM 
+     }},
+   
+
+    120  
+    { AV_PIX_FMT_GRAYF32
+     , { VK_FORMAT_R32_SFLOAT 
+     }},
+   
+
+     121 
+   
+
+    122  
+    { AV_PIX_FMT_NV12
+     , { VK_FORMAT_R8_UNORM
+     , VK_FORMAT_R8G8_UNORM 
+     }},
+   
+
+    123  
+    { AV_PIX_FMT_P010
+     , { VK_FORMAT_R16_UNORM
+     , VK_FORMAT_R16G16_UNORM 
+     }},
+   
+
+    124  
+    { AV_PIX_FMT_P016
+     , { VK_FORMAT_R16_UNORM
+     , VK_FORMAT_R16G16_UNORM 
+     }},
+   
+
+     125 
+   
+
+    126  
+    { AV_PIX_FMT_YUV420P
+     , { VK_FORMAT_R8_UNORM
+     , VK_FORMAT_R8_UNORM
+     , VK_FORMAT_R8_UNORM 
+     }},
+   
+
+    127  
+    { AV_PIX_FMT_YUV422P
+     , { VK_FORMAT_R8_UNORM
+     , VK_FORMAT_R8_UNORM
+     , VK_FORMAT_R8_UNORM 
+     }},
+   
+
+    128  
+    { AV_PIX_FMT_YUV444P
+     , { VK_FORMAT_R8_UNORM
+     , VK_FORMAT_R8_UNORM
+     , VK_FORMAT_R8_UNORM 
+     }},
+   
+
+     129 
+   
+
+    130  
+    { AV_PIX_FMT_YUV420P16
+     , { VK_FORMAT_R16_UNORM
+     , VK_FORMAT_R16_UNORM
+     , VK_FORMAT_R16_UNORM 
+     }},
+   
+
+    131  
+    { AV_PIX_FMT_YUV422P16
+     , { VK_FORMAT_R16_UNORM
+     , VK_FORMAT_R16_UNORM
+     , VK_FORMAT_R16_UNORM 
+     }},
+   
+
+    132  
+    { AV_PIX_FMT_YUV444P16
+     , { VK_FORMAT_R16_UNORM
+     , VK_FORMAT_R16_UNORM
+     , VK_FORMAT_R16_UNORM 
+     }},
+   
+
+     133 
+   
+
+    134  
+    { AV_PIX_FMT_ABGR
+     , { VK_FORMAT_A8B8G8R8_UNORM_PACK32 
+     }},
+   
+
+    135  
+    { AV_PIX_FMT_BGRA
+     , { VK_FORMAT_B8G8R8A8_UNORM 
+     }},
+   
+
+    136  
+    { AV_PIX_FMT_RGBA
+     , { VK_FORMAT_R8G8B8A8_UNORM 
+     }},
+   
+
+    137  
+    { AV_PIX_FMT_RGB24
+     , { VK_FORMAT_R8G8B8_UNORM 
+     }},
+   
+
+    138  
+    { AV_PIX_FMT_BGR24
+     , { VK_FORMAT_B8G8R8_UNORM 
+     }},
+   
+
+    139  
+    { AV_PIX_FMT_RGB48
+     , { VK_FORMAT_R16G16B16_UNORM 
+     }},
+   
+
+    140  
+    { AV_PIX_FMT_RGBA64
+     , { VK_FORMAT_R16G16B16A16_UNORM 
+     }},
+   
+
+    141  
+    { AV_PIX_FMT_RGB565
+     , { VK_FORMAT_R5G6B5_UNORM_PACK16 
+     }},
+   
+
+    142  
+    { AV_PIX_FMT_BGR565
+     , { VK_FORMAT_B5G6R5_UNORM_PACK16 
+     }},
+   
+
+    143  
+    { AV_PIX_FMT_BGR0
+     , { VK_FORMAT_B8G8R8A8_UNORM 
+     }},
+   
+
+    144  
+    { AV_PIX_FMT_0BGR
+     , { VK_FORMAT_A8B8G8R8_UNORM_PACK32 
+     }},
+   
+
+    145  
+    { AV_PIX_FMT_RGB0
+     , { VK_FORMAT_R8G8B8A8_UNORM 
+     }},
+   
+
+     146 
+   
+
+    147  
+    { AV_PIX_FMT_GBRPF32
+     , { VK_FORMAT_R32_SFLOAT
+     , VK_FORMAT_R32_SFLOAT
+     , VK_FORMAT_R32_SFLOAT 
+     }},
+   
+
+    148  
+    };
+   
+
+     149 
+   
+
+    150  
+    const VkFormat 
+     * 
+    av_vkfmt_from_pixfmt 
+    ( 
+    enumeración AVPixelFormat p
+     )
+   
+
+    151  
+    {
+   
+
+    152  
+    para  
+    ( 
+    enumeración AVPixelFormat i 
+     =  
+    0 
+    ; i 
+     <  
+    FF_ARRAY_ELEMS 
+    ( vk_pixfmt_map
+     ); i
+     ++)
+   
+
+    153  
+    si  
+    ( vk_pixfmt_map
+     [ i
+     ]. Pixfmt 
+     == p
+     )
+   
+
+    154  
+    devuelva vk_pixfmt_map
+     [ i
+     ]. vkfmts
+     ;
+   
+
+    155  
+    return NULL
+     ;
+   
+
+    156  
+    }
+   
+
+     157 
+   
+
+    158  
+    static int  
+    pixfmt_is_supported 
+    ( AVVulkanDeviceContext 
+     * hwctx
+     ,  
+    enumeración AVPixelFormat p
+     ,
+   
+
+    159  
+    int lineal
+     )
+   
+
+    160  
+    {
+   
+
+    161  
+    const VkFormat 
+     * fmt 
+     =  
+    av_vkfmt_from_pixfmt 
+    ( p
+     );
+   
+
+    162  
+    int planos 
+     =  
+    av_pix_fmt_count_planes 
+    ( p
+     );
+   
+
+     163 
+   
+
+    164  
+    si  
+    (! Fmt
+     )
+   
+
+    165  
+    return  
+    0 
+    ;
+   
+
+     166 
+   
+
+    167  
+    para  
+    ( 
+    int i 
+     =  
+    0 
+    ; i 
+     < planos
+     ; i
+     ++) {
+   
+
+    168 banderas VkFormatFeatureFlags
+     ;
+   
+
+    169 VkFormatProperties2 prop 
+     = {
+   
+
+    170  
+    . sType 
+     = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2
+     ,
+   
+
+    171  
+    };
+   
+
+    172  
+    vkGetPhysicalDeviceFormatProperties2 
+    ( hwctx
+     -> phys_dev
+     , fmt
+     [ i
+     ], & prop
+     );
+   
+
+    173 banderas 
+     = lineal 
+     ? prop
+     . formatProperties
+     . linearTilingCaracterísticas 
+     :
+   
+
+    174 prop
+     . formatProperties
+     . optimalTilingFeatures
+     ;
+   
+
+    175  
+    if  
+    (! ( Banderas 
+     & DEFAULT_USAGE_FLAGS
+     ))
+   
+
+    176  
+    devuelve  
+    0 
+    ;
+   
+
+    177  
+    }
+   
+
+     178 
+   
+
+    179  
+    retorno  
+    1 
+    ;
+   
+
+    180  
+    }
+   
+
+     181 
+   
+
+    182  
+    enumeración VulkanExtensions 
+     {
+   
+
+    183 EXT_EXTERNAL_DMABUF_MEMORY 
+     =  
+    1ULL  
+    <<  
+    0 
+    ,  
+    / * VK_EXT_external_memory_dma_buf * /
+   
+
+    184 EXT_DRM_MODIFIER_FLAGS 
+     =  
+    1ULL  
+    <<  
+    1 
+    ,  
+    / * VK_EXT_image_drm_format_modifier * /
+   
+
+    185 EXT_EXTERNAL_FD_MEMORY 
+     =  
+    1ULL  
+    <<  
+    2 
+    ,  
+    / * VK_KHR_external_memory_fd * /
+   
+
+    186 EXT_EXTERNAL_FD_SEM 
+     =  
+    1ULL  
+    <<  
+    3 
+    ,  
+    / * VK_KHR_external_semaphore_fd * /
+   
+
+     187 
+   
+
+    188 EXT_NO_FLAG 
+     =  
+    1ULL  
+    <<  
+    63 
+    ,
+   
+
+    189  
+    };
+   
+
+     190 
+   
+
+    191  
+    typedef  
+    struct VulkanOptExtension 
+     {
+   
+
+    192  
+    const char  
+    * nombre
+     ;
+   
+
+    193  
+    uint64_t flag
+     ;
+   
+
+    194  
+    } VulkanOptExtension
+     ;
+   
+
+     195 
+   
+
+    196  
+    static const VulkanOptExtension optional_instance_exts
+     [] = {
+   
+
+    197  
+    { VK_KHR_SURFACE_EXTENSION_NAME
+     , EXT_NO_FLAG 
+     },
+   
+
+    198  
+    };
+   
+
+     199 
+   
+
+    200  
+    estática const VulkanOptExtension optional_device_exts
+     [] = {
+   
+
+    201  
+    { VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME
+     , EXT_EXTERNAL_FD_MEMORY
+     ,},
+   
+
+    202  
+    { VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME
+     , EXT_EXTERNAL_DMABUF_MEMORY
+     ,},
+   
+
+    203  
+    { VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME
+     , EXT_DRM_MODIFIER_FLAGS
+     ,},
+   
+
+    204  
+    { VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME
+     , EXT_EXTERNAL_FD_SEM
+     ,},
+   
+
+    205  
+    };
+   
+
+     206 
+   
+
+    207  
+    / * Convierte los valores devueltos en cadenas * /
+   
+
+    208  
+    static const char  
+    * 
+    vk_ret2str 
+    ( VkResult res
+     )
+   
+
+    209  
+    {
+   
+
+    210  
+    #define CASE (VAL) case VAL: return #VAL
+   
+
+    211  
+    interruptor  
+    ( res
+     ) {
+   
+
+    212  
+    CASE 
+    ( VK_SUCCESS
+     );
+   
+
+    213  
+    CASO 
+    ( VK_NOT_READY
+     );
+   
+
+    214  
+    CASE 
+    ( VK_TIMEOUT
+     );
+   
+
+    215  
+    CASE 
+    ( VK_EVENT_SET
+     );
+   
+
+    216  
+    CASO 
+    ( VK_EVENT_RESET
+     );
+   
+
+    217  
+    CASE 
+    ( VK_INCOMPLETE
+     );
+   
+
+    218  
+    CASO 
+    ( VK_ERROR_OUT_OF_HOST_MEMORY
+     );
+   
+
+    219  
+    CASO 
+    ( VK_ERROR_OUT_OF_DEVICE_MEMORY
+     );
+   
+
+    220  
+    CASE 
+    ( VK_ERROR_INITIALIZATION_FAILED
+     );
+   
+
+    221  
+    CASE 
+    ( VK_ERROR_DEVICE_LOST
+     );
+   
+
+    222  
+    CASE 
+    ( VK_ERROR_MEMORY_MAP_FAILED
+     );
+   
+
+    223  
+    CASO 
+    ( VK_ERROR_LAYER_NOT_PRESENT
+     );
+   
+
+    224  
+    CASO 
+    ( VK_ERROR_EXTENSION_NOT_PRESENT
+     );
+   
+
+    225  
+    CASO 
+    ( VK_ERROR_FEATURE_NOT_PRESENT
+     );
+   
+
+    226  
+    CASE 
+    ( VK_ERROR_INCOMPATIBLE_DRIVER
+     );
+   
+
+    227  
+    CASE 
+    ( VK_ERROR_TOO_MANY_OBJECTS
+     );
+   
+
+    228  
+    CASO 
+    ( VK_ERROR_FORMAT_NOT_SUPPORTED
+     );
+   
+
+    229  
+    CASE 
+    ( VK_ERROR_FRAGMENTED_POOL
+     );
+   
+
+    230  
+    CASO 
+    ( VK_ERROR_SURFACE_LOST_KHR
+     );
+   
+
+    231  
+    CASO 
+    ( VK_ERROR_NATIVE_WINDOW_IN_USE_KHR
+     );
+   
+
+    232  
+    CASO 
+    ( VK_SUBOPTIMAL_KHR
+     );
+   
+
+    233  
+    CASO 
+    ( VK_ERROR_OUT_OF_DATE_KHR
+     );
+   
+
+    234  
+    CASE 
+    ( VK_ERROR_INCOMPATIBLE_DISPLAY_KHR
+     );
+   
+
+    235  
+    CASO 
+    ( VK_ERROR_VALIDATION_FAILED_EXT
+     );
+   
+
+    236  
+    CASO 
+    ( VK_ERROR_INVALID_SHADER_NV
+     );
+   
+
+    237  
+    CASO 
+    ( VK_ERROR_OUT_OF_POOL_MEMORY
+     );
+   
+
+    238  
+    CASE 
+    ( VK_ERROR_INVALID_EXTERNAL_HANDLE
+     );
+   
+
+    239  
+    CASO 
+    ( VK_ERROR_NOT_PERMITTED_EXT
+     );
+   
+
+    240  
+    CASE 
+    ( VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT
+     );
+   
+
+    241  
+    CASE 
+    ( VK_ERROR_INVALID_DEVICE_ADDRESS_EXT
+     );
+   
+
+    242  
+    CASE 
+    ( VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT
+     );
+   
+
+    243  
+    predeterminado 
+    :  
+    devuelve  
+    "Error desconocido" 
+    ;
+   
+
+    244  
+    }
+   
+
+    245  
+    #undef CASO
+   
+
+    246  
+    }
+   
+
+     247 
+   
+
+    248  
+    estático VkBool32 
+     vk_dbg_callback 
+    ( gravedad de VkDebugUtilsMessageSeverityFlagBitsEXT
+     ,
+   
+
+    249 VkDebugUtilsMessageTypeFlagsEXT messageType
+     ,
+   
+
+    250  
+    const VkDebugUtilsMessengerCallbackDataEXT 
+     * datos
+     ,
+   
+
+    251  
+    nulo  
+    * priv
+     )
+   
+
+    252  
+    {
+   
+
+    253  
+    int l
+     ;
+   
+
+    254 AVHWDeviceContext 
+     * ctx 
+     = priv
+     ;
+   
+
+     255 
+   
+
+    256  
+    conmutador  
+    ( gravedad
+     ) {
+   
+
+    257  
+    caso VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT
+     : l 
+     = AV_LOG_VERBOSE
+     ;  
+    romper 
+    ;
+   
+
+     258 
+    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT
+    : l 
+    = AV_LOG_INFO
+    ; 
+    break
+    ;
+   
+
+     259 
+    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
+    : l 
+    = AV_LOG_WARNING
+    ; 
+    break
+    ;
+   
+
+     260 
+    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT
+    : l 
+    = AV_LOG_ERROR
+    ; 
+    break
+    ;
+   
+
+     261 
+    default
+    : l 
+    = AV_LOG_DEBUG
+    ; 
+    break
+    ;
+   
+
+     262 
+    }
+   
+
+     263 
+   
+
+     264 
+    av_log
+    (ctx
+    , l
+    , 
+    "%s
+    \n
+    "
+    , data
+    ->pMessage
+    );
+   
+
+     265 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < data
+    ->cmdBufLabelCount
+    ; i
+    ++)
+   
+
+     266 
+    av_log
+    (ctx
+    , l
+    , 
+    "
+    \t
+    %i: %s
+    \n
+    "
+    , i
+    , data
+    ->pCmdBufLabels
+    [i
+    ].pLabelName
+    );
+   
+
+     267 
+   
+
+     268 
+    return 
+    0
+    ;
+   
+
+     269 
+    }
+   
+
+     270 
+   
+
+     271 
+    static int 
+    check_extensions
+    (AVHWDeviceContext 
+    *ctx
+    , 
+    int dev
+    , AVDictionary 
+    *opts
+    ,
+   
+
+     272 
+    const char 
+    * 
+    const 
+    **dst
+    , 
+    uint32_t 
+    *num
+    , 
+    int debug
+    )
+   
+
+     273 
+    {
+   
+
+     274 
+    const char 
+    *tstr
+    ;
+   
+
+     275 
+    const char 
+    **extension_names 
+    = NULL
+    ;
+   
+
+     276 VulkanDevicePriv 
+    *p 
+    = ctx
+    ->internal
+    ->priv
+    ;
+   
+
+     277 AVVulkanDeviceContext 
+    *hwctx 
+    = ctx
+    ->hwctx
+    ;
+   
+
+     278 
+    int err 
+    = 
+    0
+    , found
+    , extensions_found 
+    = 
+    0
+    ;
+   
+
+     279 
+   
+
+     280 
+    const char 
+    *mod
+    ;
+   
+
+     281 
+    int optional_exts_num
+    ;
+   
+
+     282 
+    uint32_t sup_ext_count
+    ;
+   
+
+     283 
+    char 
+    *user_exts_str 
+    = NULL
+    ;
+   
+
+     284 AVDictionaryEntry 
+    *user_exts
+    ;
+   
+
+     285 VkExtensionProperties 
+    *sup_ext
+    ;
+   
+
+     286 
+    const VulkanOptExtension 
+    *optional_exts
+    ;
+   
+
+     287 
+   
+
+     288 
+    if 
+    (!dev
+    ) {
+   
+
+     289 mod 
+    = 
+    "instance"
+    ;
+   
+
+     290 optional_exts 
+    = optional_instance_exts
+    ;
+   
+
+     291 optional_exts_num 
+    = 
+    FF_ARRAY_ELEMS
+    (optional_instance_exts
+    );
+   
+
+     292 user_exts 
+    = 
+    av_dict_get
+    (opts
+    , 
+    "instance_extensions"
+    , NULL
+    , 
+    0
+    );
+   
+
+     293 
+    if 
+    (user_exts
+    ) {
+   
+
+     294 user_exts_str 
+    = 
+    av_strdup
+    (user_exts
+    ->value
+    );
+   
+
+     295 
+    if 
+    (!user_exts_str
+    ) {
+   
+
+     296 err 
+    = 
+    AVERROR
+    (ENOMEM
+    );
+   
+
+     297 
+    goto fail
+    ;
+   
+
+     298 
+    }
+   
+
+     299 
+    }
+   
+
+     300 
+    vkEnumerateInstanceExtensionProperties
+    (NULL
+    , &sup_ext_count
+    , NULL
+    );
+   
+
+     301 sup_ext 
+    = 
+    av_malloc_array
+    (sup_ext_count
+    , 
+    sizeof
+    (VkExtensionProperties
+    ));
+   
+
+     302 
+    if 
+    (!sup_ext
+    )
+   
+
+     303 
+    return 
+    AVERROR
+    (ENOMEM
+    );
+   
+
+     304 
+    vkEnumerateInstanceExtensionProperties
+    (NULL
+    , &sup_ext_count
+    , sup_ext
+    );
+   
+
+     305 
+    } 
+    else 
+    {
+   
+
+     306 mod 
+    = 
+    "device"
+    ;
+   
+
+     307 optional_exts 
+    = optional_device_exts
+    ;
+   
+
+     308 optional_exts_num 
+    = 
+    FF_ARRAY_ELEMS
+    (optional_device_exts
+    );
+   
+
+     309 user_exts 
+    = 
+    av_dict_get
+    (opts
+    , 
+    "device_extensions"
+    , NULL
+    , 
+    0
+    );
+   
+
+     310 
+    if 
+    (user_exts
+    ) {
+   
+
+     311 user_exts_str 
+    = 
+    av_strdup
+    (user_exts
+    ->value
+    );
+   
+
+     312 
+    if 
+    (!user_exts_str
+    ) {
+   
+
+     313 err 
+    = 
+    AVERROR
+    (ENOMEM
+    );
+   
+
+     314 
+    goto fail
+    ;
+   
+
+     315 
+    }
+   
+
+     316 
+    }
+   
+
+     317 
+    vkEnumerateDeviceExtensionProperties
+    (hwctx
+    ->phys_dev
+    , NULL
+    ,
+   
+
+     318 
+    &sup_ext_count
+    , NULL
+    );
+   
+
+     319 sup_ext 
+    = 
+    av_malloc_array
+    (sup_ext_count
+    , 
+    sizeof
+    (VkExtensionProperties
+    ));
+   
+
+     320 
+    if 
+    (!sup_ext
+    )
+   
+
+     321 
+    return 
+    AVERROR
+    (ENOMEM
+    );
+   
+
+     322 
+    vkEnumerateDeviceExtensionProperties
+    (hwctx
+    ->phys_dev
+    , NULL
+    ,
+   
+
+     323 
+    &sup_ext_count
+    , sup_ext
+    );
+   
+
+     324 
+    }
+   
+
+     325 
+   
+
+     326 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < optional_exts_num
+    ; i
+    ++) {
+   
+
+     327 tstr 
+    = optional_exts
+    [i
+    ].name
+    ;
+   
+
+     328 found 
+    = 
+    0
+    ;
+   
+
+     329 
+    for 
+    (
+    int j 
+    = 
+    0
+    ; j 
+    < sup_ext_count
+    ; j
+    ++) {
+   
+
+     330 
+    if 
+    (!
+    strcmp
+    (tstr
+    , sup_ext
+    [j
+    ].extensionName
+    )) {
+   
+
+     331 found 
+    = 
+    1
+    ;
+   
+
+     332 
+    break
+    ;
+   
+
+     333 
+    }
+   
+
+     334 
+    }
+   
+
+     335 
+    if 
+    (!found
+    )
+   
+
+     336 
+    continue
+    ;
+   
+
+     337 
+   
+
+     338 
+    av_log
+    (ctx
+    , AV_LOG_VERBOSE
+    , 
+    "Using %s extension 
+    \"
+    %s
+    \"\n
+    "
+    , mod
+    , tstr
+    );
+   
+
+     339 p
+    ->extensions 
+    |= optional_exts
+    [i
+    ].flag
+    ;
+   
+
+     340 
+    ADD_VAL_TO_LIST
+    (extension_names
+    , extensions_found
+    , tstr
+    );
+   
+
+     341 
+    }
+   
+
+     342 
+   
+
+     343 
+    if 
+    (debug 
+    && !dev
+    ) {
+   
+
+     344 tstr 
+    = VK_EXT_DEBUG_UTILS_EXTENSION_NAME
+    ;
+   
+
+     345 found 
+    = 
+    0
+    ;
+   
+
+     346 
+    for 
+    (
+    int j 
+    = 
+    0
+    ; j 
+    < sup_ext_count
+    ; j
+    ++) {
+   
+
+     347 
+    if 
+    (!
+    strcmp
+    (tstr
+    , sup_ext
+    [j
+    ].extensionName
+    )) {
+   
+
+     348 found 
+    = 
+    1
+    ;
+   
+
+     349 
+    break
+    ;
+   
+
+     350 
+    }
+   
+
+     351 
+    }
+   
+
+     352 
+    if 
+    (found
+    ) {
+   
+
+     353 
+    av_log
+    (ctx
+    , AV_LOG_VERBOSE
+    , 
+    "Using %s extension 
+    \"
+    %s
+    \"\n
+    "
+    , mod
+    , tstr
+    );
+   
+
+     354 
+    ADD_VAL_TO_LIST
+    (extension_names
+    , extensions_found
+    , tstr
+    );
+   
+
+     355 
+    } 
+    else 
+    {
+   
+
+     356 
+    av_log
+    (ctx
+    , AV_LOG_ERROR
+    , 
+    "Debug extension 
+    \"
+    %s
+    \" 
+    not found!
+    \n
+    "
+    ,
+   
+
+     357 tstr
+    );
+   
+
+     358 err 
+    = 
+    AVERROR
+    (EINVAL
+    );
+   
+
+     359 
+    goto fail
+    ;
+   
+
+     360 
+    }
+   
+
+     361 
+    }
+   
+
+     362 
+   
+
+     363 
+    if 
+    (user_exts_str
+    ) {
+   
+
+     364 
+    char 
+    *save
+    , *token 
+    = 
+    av_strtok
+    (user_exts_str
+    , 
+    "+"
+    , &save
+    );
+   
+
+     365 
+    while 
+    (token
+    ) {
+   
+
+     366 found 
+    = 
+    0
+    ;
+   
+
+     367 
+    for 
+    (
+    int j 
+    = 
+    0
+    ; j 
+    < sup_ext_count
+    ; j
+    ++) {
+   
+
+     368 
+    if 
+    (!
+    strcmp
+    (token
+    , sup_ext
+    [j
+    ].extensionName
+    )) {
+   
+
+     369 found 
+    = 
+    1
+    ;
+   
+
+     370 
+    break
+    ;
+   
+
+     371 
+    }
+   
+
+     372 
+    }
+   
+
+     373 
+    if 
+    (found
+    ) {
+   
+
+     374 
+    av_log
+    (ctx
+    , AV_LOG_VERBOSE
+    , 
+    "Using %s extension 
+    \"
+    %s
+    \"\n
+    "
+    , mod
+    , tstr
+    );
+   
+
+     375 
+    ADD_VAL_TO_LIST
+    (extension_names
+    , extensions_found
+    , token
+    );
+   
+
+     376 
+    } 
+    else 
+    {
+   
+
+     377 
+    av_log
+    (ctx
+    , AV_LOG_ERROR
+    , 
+    "%s extension 
+    \"
+    %s
+    \" 
+    not found!
+    \n
+    "
+    ,
+   
+
+     378 mod
+    , token
+    );
+   
+
+     379 err 
+    = 
+    AVERROR
+    (EINVAL
+    );
+   
+
+     380 
+    goto fail
+    ;
+   
+
+     381 
+    }
+   
+
+     382 token 
+    = 
+    av_strtok
+    (NULL
+    , 
+    "+"
+    , &save
+    );
+   
+
+     383 
+    }
+   
+
+     384 
+    }
+   
+
+     385 
+   
+
+     386 
+    *dst 
+    = extension_names
+    ;
+   
+
+     387 
+    *num 
+    = extensions_found
+    ;
+   
+
+     388 
+   
+
+     389 
+    av_free
+    (user_exts_str
+    );
+   
+
+     390 
+    av_free
+    (sup_ext
+    );
+   
+
+     391 
+    return 
+    0
+    ;
+   
+
+     392 
+   
+
+     393 fail
+    :
+   
+
+     394 
+    if 
+    (extension_names
+    )
+   
+
+     395 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < extensions_found
+    ; i
+    ++)
+   
+
+     396 
+    av_free
+    ((
+    void 
+    *)extension_names
+    [i
+    ]);
+   
+
+     397 
+    av_free
+    (extension_names
+    );
+   
+
+     398 
+    av_free
+    (user_exts_str
+    );
+   
+
+     399 
+    av_free
+    (sup_ext
+    );
+   
+
+     400 
+    return err
+    ;
+   
+
+     401 
+    }
+   
+
+     402 
+   
+
+     403 
+    /* Creates a VkInstance */
+   
+
+     404 
+    static int 
+    create_instance
+    (AVHWDeviceContext 
+    *ctx
+    , AVDictionary 
+    *opts
+    )
+   
+
+     405 
+    {
+   
+
+     406 
+    int err 
+    = 
+    0
+    ;
+   
+
+     407 VkResult ret
+    ;
+   
+
+     408 VulkanDevicePriv 
+    *p 
+    = ctx
+    ->internal
+    ->priv
+    ;
+   
+
+     409 AVVulkanDeviceContext 
+    *hwctx 
+    = ctx
+    ->hwctx
+    ;
+   
+
+     410 AVDictionaryEntry 
+    *debug_opt 
+    = 
+    av_dict_get
+    (opts
+    , 
+    "debug"
+    , NULL
+    , 
+    0
+    );
+   
+
+     411 
+    const int debug_mode 
+    = debug_opt 
+    && 
+    strtol
+    (debug_opt
+    ->value
+    , NULL
+    , 
+    10
+    );
+   
+
+     412 VkApplicationInfo application_info 
+    = {
+   
+
+     413 
+    .sType 
+    = VK_STRUCTURE_TYPE_APPLICATION_INFO
+    ,
+   
+
+     414 
+    .pEngineName 
+    = 
+    "libavutil"
+    ,
+   
+
+     415 
+    .apiVersion 
+    = VK_API_VERSION_1_1
+    ,
+   
+
+     416 
+    .engineVersion 
+    = 
+    VK_MAKE_VERSION
+    (LIBAVUTIL_VERSION_MAJOR
+    ,
+   
+
+     417 LIBAVUTIL_VERSION_MINOR
+    ,
+   
+
+     418 LIBAVUTIL_VERSION_MICRO
+    ),
+   
+
+     419 
+    };
+   
+
+     420 VkInstanceCreateInfo inst_props 
+    = {
+   
+
+     421 
+    .sType 
+    = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO
+    ,
+   
+
+     422 
+    .pApplicationInfo 
+    = &application_info
+    ,
+   
+
+     423 
+    };
+   
+
+     424 
+   
+
+     425 
+    /* Check for present/missing extensions */
+   
+
+     426 err 
+    = 
+    check_extensions
+    (ctx
+    , 
+    0
+    , opts
+    , &inst_props
+    .ppEnabledExtensionNames
+    ,
+   
+
+     427 
+    &inst_props
+    .enabledExtensionCount
+    , debug_mode
+    );
+   
+
+     428 
+    if 
+    (err 
+    < 
+    0
+    )
+   
+
+     429 
+    return err
+    ;
+   
+
+     430 
+   
+
+     431 
+    if 
+    (debug_mode
+    ) {
+   
+
+     432 
+    static const char 
+    *layers
+    [] = { 
+    "VK_LAYER_KHRONOS_validation" 
+    };
+   
+
+     433 inst_props
+    .ppEnabledLayerNames 
+    = layers
+    ;
+   
+
+     434 inst_props
+    .enabledLayerCount 
+    = 
+    FF_ARRAY_ELEMS
+    (layers
+    );
+   
+
+     435 
+    }
+   
+
+     436 
+   
+
+     437 
+    /* Try to create the instance */
+   
+
+     438 ret 
+    = 
+    vkCreateInstance
+    (&inst_props
+    , hwctx
+    ->alloc
+    , &hwctx
+    ->inst
+    );
+   
+
+     439 
+   
+
+     440 
+    /* Check for errors */
+   
+
+     441 
+    if 
+    (ret 
+    != VK_SUCCESS
+    ) {
+   
+
+     442 
+    av_log
+    (ctx
+    , AV_LOG_ERROR
+    , 
+    "Instance creation failure: %s
+    \n
+    "
+    ,
+   
+
+     443 
+    vk_ret2str
+    (ret
+    ));
+   
+
+     444 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < inst_props
+    .enabledExtensionCount
+    ; i
+    ++)
+   
+
+     445 
+    av_free
+    ((
+    void 
+    *)inst_props
+    .ppEnabledExtensionNames
+    [i
+    ]);
+   
+
+     446 
+    av_free
+    ((
+    void 
+    *)inst_props
+    .ppEnabledExtensionNames
+    );
+   
+
+     447 
+    return AVERROR_EXTERNAL
+    ;
+   
+
+     448 
+    }
+   
+
+     449 
+   
+
+     450 
+    if 
+    (debug_mode
+    ) {
+   
+
+     451 VkDebugUtilsMessengerCreateInfoEXT dbg 
+    = {
+   
+
+     452 
+    .sType 
+    = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT
+    ,
+   
+
+     453 
+    .messageSeverity 
+    = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT 
+    |
+   
+
+     454 VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT 
+    |
+   
+
+     455 VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT 
+    |
+   
+
+     456 VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT
+    ,
+   
+
+     457 
+    .messageType 
+    = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT 
+    |
+   
+
+     458 VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT 
+    |
+   
+
+     459 VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT
+    ,
+   
+
+     460 
+    .pfnUserCallback 
+    = vk_dbg_callback
+    ,
+   
+
+     461 
+    .pUserData 
+    = ctx
+    ,
+   
+
+     462 
+    };
+   
+
+     463 
+    VK_LOAD_PFN
+    (hwctx
+    ->inst
+    , vkCreateDebugUtilsMessengerEXT
+    );
+   
+
+     464 
+   
+
+     465 
+    pfn_vkCreateDebugUtilsMessengerEXT
+    (hwctx
+    ->inst
+    , &dbg
+    ,
+   
+
+     466 hwctx
+    ->alloc
+    , &p
+    ->debug_ctx
+    );
+   
+
+     467 
+    }
+   
+
+     468 
+   
+
+     469 hwctx
+    ->enabled_inst_extensions 
+    = inst_props
+    .ppEnabledExtensionNames
+    ;
+   
+
+     470 hwctx
+    ->nb_enabled_inst_extensions 
+    = inst_props
+    .enabledExtensionCount
+    ;
+   
+
+     471 
+   
+
+     472 
+    return 
+    0
+    ;
+   
+
+     473 
+    }
+   
+
+     474 
+   
+
+     475 
+    typedef 
+    struct VulkanDeviceSelection 
+    {
+   
+
+     476 
+    uint8_t uuid
+    [VK_UUID_SIZE
+    ]; 
+    /* Will use this first unless !has_uuid */
+   
+
+     477 
+    int has_uuid
+    ;
+   
+
+     478 
+    const char 
+    *name
+    ; 
+    /* Will use this second unless NULL */
+   
+
+     479 
+    uint32_t pci_device
+    ; 
+    /* Will use this third unless 0x0 */
+   
+
+     480 
+    uint32_t vendor_id
+    ; 
+    /* Last resort to find something deterministic */
+   
+
+     481 
+    int index
+    ; 
+    /* Finally fall back to index */
+   
+
+     482 
+    } VulkanDeviceSelection
+    ;
+   
+
+     483 
+   
+
+     484 
+    static const char 
+    *
+    vk_dev_type
+    (
+    enum VkPhysicalDeviceType type
+    )
+   
+
+     485 
+    {
+   
+
+     486 
+    switch 
+    (type
+    ) {
+   
+
+     487 
+    case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU
+    : 
+    return 
+    "integrated"
+    ;
+   
+
+     488 
+    case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+    : 
+    return 
+    "discrete"
+    ;
+   
+
+     489 
+    case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU
+    : 
+    return 
+    "virtual"
+    ;
+   
+
+     490 
+    case VK_PHYSICAL_DEVICE_TYPE_CPU
+    : 
+    return 
+    "software"
+    ;
+   
+
+     491 
+    default
+    : 
+    return 
+    "unknown"
+    ;
+   
+
+     492 
+    }
+   
+
+     493 
+    }
+   
+
+     494 
+   
+
+     495 
+    /* Finds a device */
+   
+
+     496 
+    static int 
+    find_device
+    (AVHWDeviceContext 
+    *ctx
+    , VulkanDeviceSelection 
+    *select
+    )
+   
+
+     497 
+    {
+   
+
+     498 
+    int err 
+    = 
+    0
+    , choice 
+    = -
+    1
+    ;
+   
+
+     499 
+    uint32_t num
+    ;
+   
+
+     500 VkResult ret
+    ;
+   
+
+     501 VkPhysicalDevice 
+    *devices 
+    = NULL
+    ;
+   
+
+     502 VkPhysicalDeviceIDProperties 
+    *idp 
+    = NULL
+    ;
+   
+
+     503 VkPhysicalDeviceProperties2 
+    *prop 
+    = NULL
+    ;
+   
+
+     504 VulkanDevicePriv 
+    *p 
+    = ctx
+    ->internal
+    ->priv
+    ;
+   
+
+     505 AVVulkanDeviceContext 
+    *hwctx 
+    = ctx
+    ->hwctx
+    ;
+   
+
+     506 
+   
+
+     507 ret 
+    = 
+    vkEnumeratePhysicalDevices
+    (hwctx
+    ->inst
+    , &num
+    , NULL
+    );
+   
+
+     508 
+    if 
+    (ret 
+    != VK_SUCCESS 
+    || !num
+    ) {
+   
+
+     509 
+    av_log
+    (ctx
+    , AV_LOG_ERROR
+    , 
+    "No devices found: %s!
+    \n
+    "
+    , 
+    vk_ret2str
+    (ret
+    ));
+   
+
+     510 
+    return 
+    AVERROR
+    (ENODEV
+    );
+   
+
+     511 
+    }
+   
+
+     512 
+   
+
+     513 devices 
+    = 
+    av_malloc_array
+    (num
+    , 
+    sizeof
+    (VkPhysicalDevice
+    ));
+   
+
+     514 
+    if 
+    (!devices
+    )
+   
+
+     515 
+    return 
+    AVERROR
+    (ENOMEM
+    );
+   
+
+     516 
+   
+
+     517 ret 
+    = 
+    vkEnumeratePhysicalDevices
+    (hwctx
+    ->inst
+    , &num
+    , devices
+    );
+   
+
+     518 
+    if 
+    (ret 
+    != VK_SUCCESS
+    ) {
+   
+
+     519 
+    av_log
+    (ctx
+    , AV_LOG_ERROR
+    , 
+    "Failed enumerating devices: %s
+    \n
+    "
+    ,
+   
+
+     520 
+    vk_ret2str
+    (ret
+    ));
+   
+
+     521 err 
+    = 
+    AVERROR
+    (ENODEV
+    );
+   
+
+     522 
+    goto end
+    ;
+   
+
+     523 
+    }
+   
+
+     524 
+   
+
+     525 prop 
+    = 
+    av_mallocz_array
+    (num
+    , 
+    sizeof
+    (*prop
+    ));
+   
+
+     526 
+    if 
+    (!prop
+    ) {
+   
+
+     527 err 
+    = 
+    AVERROR
+    (ENOMEM
+    );
+   
+
+     528 
+    goto end
+    ;
+   
+
+     529 
+    }
+   
+
+     530 
+   
+
+     531 idp 
+    = 
+    av_mallocz_array
+    (num
+    , 
+    sizeof
+    (*idp
+    ));
+   
+
+     532 
+    if 
+    (!idp
+    ) {
+   
+
+     533 err 
+    = 
+    AVERROR
+    (ENOMEM
+    );
+   
+
+     534 
+    goto end
+    ;
+   
+
+     535 
+    }
+   
+
+     536 
+   
+
+     537 
+    av_log
+    (ctx
+    , AV_LOG_VERBOSE
+    , 
+    "GPU listing:
+    \n
+    "
+    );
+   
+
+     538 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < num
+    ; i
+    ++) {
+   
+
+     539 idp
+    [i
+    ].sType 
+    = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES
+    ;
+   
+
+     540 prop
+    [i
+    ].sType 
+    = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2
+    ;
+   
+
+     541 prop
+    [i
+    ].pNext 
+    = &idp
+    [i
+    ];
+   
+
+     542 
+   
+
+     543 
+    vkGetPhysicalDeviceProperties2
+    (devices
+    [i
+    ], &prop
+    [i
+    ]);
+   
+
+     544 
+    av_log
+    (ctx
+    , AV_LOG_VERBOSE
+    , 
+    " %d: %s (%s) (0x%x)
+    \n
+    "
+    , i
+    ,
+   
+
+     545 prop
+    [i
+    ].properties
+    .deviceName
+    ,
+   
+
+     546 
+    vk_dev_type
+    (prop
+    [i
+    ].properties
+    .deviceType
+    ),
+   
+
+     547 prop
+    [i
+    ].properties
+    .deviceID
+    );
+   
+
+     548 
+    }
+   
+
+     549 
+   
+
+     550 
+    if 
+    (select
+    ->has_uuid
+    ) {
+   
+
+     551 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < num
+    ; i
+    ++) {
+   
+
+     552 
+    if 
+    (!
+    strncmp
+    (idp
+    [i
+    ].deviceUUID
+    , select
+    ->uuid
+    , VK_UUID_SIZE
+    )) {
+   
+
+     553 choice 
+    = i
+    ;
+   
+
+     554 
+    goto end
+    ;
+   
+
+     555 
+    }
+   
+
+     556 
+    }
+   
+
+     557 
+    av_log
+    (ctx
+    , AV_LOG_ERROR
+    , 
+    "Unable to find device by given UUID!
+    \n
+    "
+    );
+   
+
+     558 err 
+    = 
+    AVERROR
+    (ENODEV
+    );
+   
+
+     559 
+    goto end
+    ;
+   
+
+     560 
+    } 
+    else if 
+    (select
+    ->name
+    ) {
+   
+
+     561 
+    av_log
+    (ctx
+    , AV_LOG_VERBOSE
+    , 
+    "Requested device: %s
+    \n
+    "
+    , select
+    ->name
+    );
+   
+
+     562 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < num
+    ; i
+    ++) {
+   
+
+     563 
+    if 
+    (
+    strstr
+    (prop
+    [i
+    ].properties
+    .deviceName
+    , select
+    ->name
+    )) {
+   
+
+     564 choice 
+    = i
+    ;
+   
+
+     565 
+    goto end
+    ;
+   
+
+     566 
+    }
+   
+
+     567 
+    }
+   
+
+     568 
+    av_log
+    (ctx
+    , AV_LOG_ERROR
+    , 
+    "Unable to find device 
+    \"
+    %s
+    \"
+    !
+    \n
+    "
+    ,
+   
+
+     569 select
+    ->name
+    );
+   
+
+     570 err 
+    = 
+    AVERROR
+    (ENODEV
+    );
+   
+
+     571 
+    goto end
+    ;
+   
+
+     572 
+    } 
+    else if 
+    (select
+    ->pci_device
+    ) {
+   
+
+     573 
+    av_log
+    (ctx
+    , AV_LOG_VERBOSE
+    , 
+    "Requested device: 0x%x
+    \n
+    "
+    , select
+    ->pci_device
+    );
+   
+
+     574 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < num
+    ; i
+    ++) {
+   
+
+     575 
+    if 
+    (select
+    ->pci_device 
+    == prop
+    [i
+    ].properties
+    .deviceID
+    ) {
+   
+
+     576 choice 
+    = i
+    ;
+   
+
+     577 
+    goto end
+    ;
+   
+
+     578 
+    }
+   
+
+     579 
+    }
+   
+
+     580 
+    av_log
+    (ctx
+    , AV_LOG_ERROR
+    , 
+    "Unable to find device with PCI ID 0x%x!
+    \n
+    "
+    ,
+   
+
+     581 select
+    ->pci_device
+    );
+   
+
+     582 err 
+    = 
+    AVERROR
+    (EINVAL
+    );
+   
+
+     583 
+    goto end
+    ;
+   
+
+     584 
+    } 
+    else if 
+    (select
+    ->vendor_id
+    ) {
+   
+
+     585 
+    av_log
+    (ctx
+    , AV_LOG_VERBOSE
+    , 
+    "Requested vendor: 0x%x
+    \n
+    "
+    , select
+    ->vendor_id
+    );
+   
+
+     586 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < num
+    ; i
+    ++) {
+   
+
+     587 
+    if 
+    (select
+    ->vendor_id 
+    == prop
+    [i
+    ].properties
+    .vendorID
+    ) {
+   
+
+     588 choice 
+    = i
+    ;
+   
+
+     589 
+    goto end
+    ;
+   
+
+     590 
+    }
+   
+
+     591 
+    }
+   
+
+     592 
+    av_log
+    (ctx
+    , AV_LOG_ERROR
+    , 
+    "Unable to find device with Vendor ID 0x%x!
+    \n
+    "
+    ,
+   
+
+     593 select
+    ->vendor_id
+    );
+   
+
+     594 err 
+    = 
+    AVERROR
+    (ENODEV
+    );
+   
+
+     595 
+    goto end
+    ;
+   
+
+     596 
+    } 
+    else 
+    {
+   
+
+     597 
+    if 
+    (select
+    ->index 
+    < num
+    ) {
+   
+
+     598 choice 
+    = select
+    ->index
+    ;
+   
+
+     599 
+    goto end
+    ;
+   
+
+     600 
+    }
+   
+
+     601 
+    av_log
+    (ctx
+    , AV_LOG_ERROR
+    , 
+    "Unable to find device with index %i!
+    \n
+    "
+    ,
+   
+
+     602 select
+    ->index
+    );
+   
+
+     603 err 
+    = 
+    AVERROR
+    (ENODEV
+    );
+   
+
+     604 
+    goto end
+    ;
+   
+
+     605 
+    }
+   
+
+     606 
+   
+
+     607 end
+    :
+   
+
+     608 
+    if 
+    (choice 
+    > -
+    1
+    ) {
+   
+
+     609 p
+    ->dev_is_nvidia 
+    = (prop
+    [choice
+    ].properties
+    .vendorID 
+    == 
+    0x10de
+    );
+   
+
+     610 hwctx
+    ->phys_dev 
+    = devices
+    [choice
+    ];
+   
+
+     611 
+    }
+   
+
+     612 
+    av_free
+    (devices
+    );
+   
+
+     613 
+    av_free
+    (prop
+    );
+   
+
+     614 
+    av_free
+    (idp
+    );
+   
+
+     615 
+   
+
+     616 
+    return err
+    ;
+   
+
+     617 
+    }
+   
+
+     618 
+   
+
+     619 
+    static int 
+    search_queue_families
+    (AVHWDeviceContext 
+    *ctx
+    , VkDeviceCreateInfo 
+    *cd
+    )
+   
+
+     620 
+    {
+   
+
+     621 
+    uint32_t num
+    ;
+   
+
+     622 VkQueueFamilyProperties 
+    *qs 
+    = NULL
+    ;
+   
+
+     623 AVVulkanDeviceContext 
+    *hwctx 
+    = ctx
+    ->hwctx
+    ;
+   
+
+     624 
+    int graph_index 
+    = -
+    1
+    , comp_index 
+    = -
+    1
+    , tx_index 
+    = -
+    1
+    ;
+   
+
+     625 VkDeviceQueueCreateInfo 
+    *pc 
+    = (VkDeviceQueueCreateInfo 
+    *)cd
+    ->pQueueCreateInfos
+    ;
+   
+
+     626 
+   
+
+     627 
+    /* First get the number of queue families */
+   
+
+     628 
+    vkGetPhysicalDeviceQueueFamilyProperties
+    (hwctx
+    ->phys_dev
+    , &num
+    , NULL
+    );
+   
+
+     629 
+    if 
+    (!num
+    ) {
+   
+
+     630 
+    av_log
+    (ctx
+    , AV_LOG_ERROR
+    , 
+    "Failed to get queues!
+    \n
+    "
+    );
+   
+
+     631 
+    return AVERROR_EXTERNAL
+    ;
+   
+
+     632 
+    }
+   
+
+     633 
+   
+
+     634 
+    /* Then allocate memory */
+   
+
+     635 qs 
+    = 
+    av_malloc_array
+    (num
+    , 
+    sizeof
+    (VkQueueFamilyProperties
+    ));
+   
+
+     636 
+    if 
+    (!qs
+    )
+   
+
+     637 
+    return 
+    AVERROR
+    (ENOMEM
+    );
+   
+
+     638 
+   
+
+     639 
+    /* Finally retrieve the queue families */
+   
+
+     640 
+    vkGetPhysicalDeviceQueueFamilyProperties
+    (hwctx
+    ->phys_dev
+    , &num
+    , qs
+    );
+   
+
+     641 
+   
+
+     642 
+    #define SEARCH_FLAGS(expr, out) \
+   
+
+     643 
+     for (int i = 0; i < num; i++) { \
+   
+
+     644 
+     const VkQueueFlagBits flags = qs[i].queueFlags; \
+   
+
+     645 
+     if (expr) { \
+   
+
+     646 
+     out = i; \
+   
+
+     647 
+     break; \
+   
+
+     648 
+     } \
+   
+
+     649 
+     }
+   
+
+     650 
+   
+
+     651 
+    SEARCH_FLAGS
+    (flags 
+    & VK_QUEUE_GRAPHICS_BIT
+    , graph_index
+    )
+   
+
+     652 
+   
+
+     653 
+    SEARCH_FLAGS
+    ((flags 
+    & VK_QUEUE_COMPUTE_BIT
+    ) && (i 
+    != graph_index
+    ),
+   
+
+     654 comp_index
+    )
+   
+
+     655 
+   
+
+     656 
+    SEARCH_FLAGS
+    ((flags 
+    & VK_QUEUE_TRANSFER_BIT
+    ) && (i 
+    != graph_index
+    ) &&
+   
+
+     657 
+    (i 
+    != comp_index
+    ), tx_index
+    )
+   
+
+     658 
+   
+
+     659 
+    #undef SEARCH_FLAGS
+   
+
+     660 
+    #define QF_FLAGS(flags) \
+   
+
+     661 
+     ((flags) & VK_QUEUE_GRAPHICS_BIT ) ? 
+    "(graphics) "
+     : 
+    ""
+    , \
+   
+
+     662 
+     ((flags) & VK_QUEUE_COMPUTE_BIT ) ? 
+    "(compute) "
+     : 
+    ""
+    , \
+   
+
+     663 
+     ((flags) & VK_QUEUE_TRANSFER_BIT ) ? 
+    "(transfer) "
+     : 
+    ""
+    , \
+   
+
+     664 
+     ((flags) & VK_QUEUE_SPARSE_BINDING_BIT) ? 
+    "(sparse) "
+     : 
+    ""
+    
+   
+
+     665 
+   
+
+     666 
+    av_log
+    (ctx
+    , AV_LOG_VERBOSE
+    , 
+    "Using queue family %i for graphics, "
+   
+
+     667 
+    "flags: %s%s%s%s
+    \n
+    "
+    , graph_index
+    , 
+    QF_FLAGS
+    (qs
+    [graph_index
+    ].queueFlags
+    ));
+   
+
+     668 
+   
+
+     669 hwctx
+    ->queue_family_index 
+    = graph_index
+    ;
+   
+
+     670 hwctx
+    ->queue_family_tx_index 
+    = graph_index
+    ;
+   
+
+     671 hwctx
+    ->queue_family_comp_index 
+    = graph_index
+    ;
+   
+
+     672 
+   
+
+     673 pc
+    [cd
+    ->queueCreateInfoCount
+    ++].queueFamilyIndex 
+    = graph_index
+    ;
+   
+
+     674 
+   
+
+     675 
+    if 
+    (comp_index 
+    != -
+    1
+    ) {
+   
+
+     676 
+    av_log
+    (ctx
+    , AV_LOG_VERBOSE
+    , 
+    "Using queue family %i for compute, "
+   
+
+     677 
+    "flags: %s%s%s%s
+    \n
+    "
+    , comp_index
+    , 
+    QF_FLAGS
+    (qs
+    [comp_index
+    ].queueFlags
+    ));
+   
+
+     678 hwctx
+    ->queue_family_tx_index 
+    = comp_index
+    ;
+   
+
+     679 hwctx
+    ->queue_family_comp_index 
+    = comp_index
+    ;
+   
+
+     680 pc
+    [cd
+    ->queueCreateInfoCount
+    ++].queueFamilyIndex 
+    = comp_index
+    ;
+   
+
+     681 
+    }
+   
+
+     682 
+   
+
+     683 
+    if 
+    (tx_index 
+    != -
+    1
+    ) {
+   
+
+     684 
+    av_log
+    (ctx
+    , AV_LOG_VERBOSE
+    , 
+    "Using queue family %i for transfers, "
+   
+
+     685 
+    "flags: %s%s%s%s
+    \n
+    "
+    , tx_index
+    , 
+    QF_FLAGS
+    (qs
+    [tx_index
+    ].queueFlags
+    ));
+   
+
+     686 hwctx
+    ->queue_family_tx_index 
+    = tx_index
+    ;
+   
+
+     687 pc
+    [cd
+    ->queueCreateInfoCount
+    ++].queueFamilyIndex 
+    = tx_index
+    ;
+   
+
+     688 
+    }
+   
+
+     689 
+   
+
+     690 
+    #undef QF_FLAGS
+   
+
+     691 
+   
+
+     692 
+    av_free
+    (qs
+    );
+   
+
+     693 
+   
+
+     694 
+    return 
+    0
+    ;
+   
+
+     695 
+    }
+   
+
+     696 
+   
+
+     697 
+    static int 
+    create_exec_ctx
+    (AVHWDeviceContext 
+    *ctx
+    , VulkanExecCtx 
+    *cmd
+    ,
+   
+
+     698 
+    int queue_family_index
+    )
+   
+
+     699 
+    {
+   
+
+     700 VkResult ret
+    ;
+   
+
+     701 AVVulkanDeviceContext 
+    *hwctx 
+    = ctx
+    ->hwctx
+    ;
+   
+
+     702 
+   
+
+     703 VkCommandPoolCreateInfo cqueue_create 
+    = {
+   
+
+     704 
+    .sType 
+    = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO
+    ,
+   
+
+     705 
+    .flags 
+    = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT
+    ,
+   
+
+     706 
+    .queueFamilyIndex 
+    = queue_family_index
+    ,
+   
+
+     707 
+    };
+   
+
+     708 VkCommandBufferAllocateInfo cbuf_create 
+    = {
+   
+
+     709 
+    .sType 
+    = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
+    ,
+   
+
+     710 
+    .level 
+    = VK_COMMAND_BUFFER_LEVEL_PRIMARY
+    ,
+   
+
+     711 
+    .commandBufferCount 
+    = 
+    1
+    ,
+   
+
+     712 
+    };
+   
+
+     713 
+   
+
+     714 VkFenceCreateInfo fence_spawn 
+    = {
+   
+
+     715 
+    .sType 
+    = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO
+    ,
+   
+
+     716 
+    };
+   
+
+     717 
+   
+
+     718 ret 
+    = 
+    vkCreateFence
+    (hwctx
+    ->act_dev
+    , &fence_spawn
+    ,
+   
+
+     719 hwctx
+    ->alloc
+    , &cmd
+    ->fence
+    );
+   
+
+     720 
+    if 
+    (ret 
+    != VK_SUCCESS
+    ) {
+   
+
+     721 
+    av_log
+    (ctx
+    , AV_LOG_ERROR
+    , 
+    "Failed to create frame fence: %s
+    \n
+    "
+    ,
+   
+
+     722 
+    vk_ret2str
+    (ret
+    ));
+   
+
+     723 
+    return AVERROR_EXTERNAL
+    ;
+   
+
+     724 
+    }
+   
+
+     725 
+   
+
+     726 ret 
+    = 
+    vkCreateCommandPool
+    (hwctx
+    ->act_dev
+    , &cqueue_create
+    ,
+   
+
+     727 hwctx
+    ->alloc
+    , &cmd
+    ->pool
+    );
+   
+
+     728 
+    if 
+    (ret 
+    != VK_SUCCESS
+    ) {
+   
+
+     729 
+    av_log
+    (ctx
+    , AV_LOG_ERROR
+    , 
+    "Command pool creation failure: %s
+    \n
+    "
+    ,
+   
+
+     730 
+    vk_ret2str
+    (ret
+    ));
+   
+
+     731 
+    return AVERROR_EXTERNAL
+    ;
+   
+
+     732 
+    }
+   
+
+     733 
+   
+
+     734 cbuf_create
+    .commandPool 
+    = cmd
+    ->pool
+    ;
+   
+
+     735 
+   
+
+     736 ret 
+    = 
+    vkAllocateCommandBuffers
+    (hwctx
+    ->act_dev
+    , &cbuf_create
+    , &cmd
+    ->buf
+    );
+   
+
+     737 
+    if 
+    (ret 
+    != VK_SUCCESS
+    ) {
+   
+
+     738 
+    av_log
+    (ctx
+    , AV_LOG_ERROR
+    , 
+    "Command buffer alloc failure: %s
+    \n
+    "
+    ,
+   
+
+     739 
+    vk_ret2str
+    (ret
+    ));
+   
+
+     740 
+    return AVERROR_EXTERNAL
+    ;
+   
+
+     741 
+    }
+   
+
+     742 
+   
+
+     743 
+    vkGetDeviceQueue
+    (hwctx
+    ->act_dev
+    , cqueue_create
+    .queueFamilyIndex
+    , 
+    0
+    ,
+   
+
+     744 
+    &cmd
+    ->queue
+    );
+   
+
+     745 
+   
+
+     746 
+    return 
+    0
+    ;
+   
+
+     747 
+    }
+   
+
+     748 
+   
+
+     749 
+    static void 
+    free_exec_ctx
+    (AVHWDeviceContext 
+    *ctx
+    , VulkanExecCtx 
+    *cmd
+    )
+   
+
+     750 
+    {
+   
+
+     751 AVVulkanDeviceContext 
+    *hwctx 
+    = ctx
+    ->hwctx
+    ;
+   
+
+     752 
+   
+
+     753 
+    if 
+    (cmd
+    ->fence
+    )
+   
+
+     754 
+    vkDestroyFence
+    (hwctx
+    ->act_dev
+    , cmd
+    ->fence
+    , hwctx
+    ->alloc
+    );
+   
+
+     755 
+    if 
+    (cmd
+    ->buf
+    )
+   
+
+     756 
+    vkFreeCommandBuffers
+    (hwctx
+    ->act_dev
+    , cmd
+    ->pool
+    , 
+    1
+    , &cmd
+    ->buf
+    );
+   
+
+     757 
+    if 
+    (cmd
+    ->pool
+    )
+   
+
+     758 
+    vkDestroyCommandPool
+    (hwctx
+    ->act_dev
+    , cmd
+    ->pool
+    , hwctx
+    ->alloc
+    );
+   
+
+     759 
+    }
+   
+
+     760 
+   
+
+     761 
+    static void 
+    vulkan_device_free
+    (AVHWDeviceContext 
+    *ctx
+    )
+   
+
+     762 
+    {
+   
+
+     763 VulkanDevicePriv 
+    *p 
+    = ctx
+    ->internal
+    ->priv
+    ;
+   
+
+     764 AVVulkanDeviceContext 
+    *hwctx 
+    = ctx
+    ->hwctx
+    ;
+   
+
+     765 
+   
+
+     766 
+    free_exec_ctx
+    (ctx
+    , &p
+    ->cmd
+    );
+   
+
+     767 
+   
+
+     768 
+    vkDestroyDevice
+    (hwctx
+    ->act_dev
+    , hwctx
+    ->alloc
+    );
+   
+
+     769 
+   
+
+     770 
+    if 
+    (p
+    ->debug_ctx
+    ) {
+   
+
+     771 
+    VK_LOAD_PFN
+    (hwctx
+    ->inst
+    , vkDestroyDebugUtilsMessengerEXT
+    );
+   
+
+     772 
+    pfn_vkDestroyDebugUtilsMessengerEXT
+    (hwctx
+    ->inst
+    , p
+    ->debug_ctx
+    ,
+   
+
+     773 hwctx
+    ->alloc
+    );
+   
+
+     774 
+    }
+   
+
+     775 
+   
+
+     776 
+    vkDestroyInstance
+    (hwctx
+    ->inst
+    , hwctx
+    ->alloc
+    );
+   
+
+     777 
+   
+
+     778 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < hwctx
+    ->nb_enabled_inst_extensions
+    ; i
+    ++)
+   
+
+     779 
+    av_free
+    ((
+    void 
+    *)hwctx
+    ->enabled_inst_extensions
+    [i
+    ]);
+   
+
+     780 
+    av_free
+    ((
+    void 
+    *)hwctx
+    ->enabled_inst_extensions
+    );
+   
+
+     781 
+   
+
+     782 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < hwctx
+    ->nb_enabled_dev_extensions
+    ; i
+    ++)
+   
+
+     783 
+    av_free
+    ((
+    void 
+    *)hwctx
+    ->enabled_dev_extensions
+    [i
+    ]);
+   
+
+     784 
+    av_free
+    ((
+    void 
+    *)hwctx
+    ->enabled_dev_extensions
+    );
+   
+
+     785 
+    }
+   
+
+     786 
+   
+
+     787 
+    static int 
+    vulkan_device_create_internal
+    (AVHWDeviceContext 
+    *ctx
+    ,
+   
+
+     788 VulkanDeviceSelection 
+    *dev_select
+    ,
+   
+
+     789 AVDictionary 
+    *opts
+    , 
+    int flags
+    )
+   
+
+     790 
+    {
+   
+
+     791 
+    int err 
+    = 
+    0
+    ;
+   
+
+     792 VkResult ret
+    ;
+   
+
+     793 AVDictionaryEntry 
+    *opt_d
+    ;
+   
+
+     794 VulkanDevicePriv 
+    *p 
+    = ctx
+    ->internal
+    ->priv
+    ;
+   
+
+     795 AVVulkanDeviceContext 
+    *hwctx 
+    = ctx
+    ->hwctx
+    ;
+   
+
+     796 VkDeviceQueueCreateInfo queue_create_info
+    [
+    3
+    ] = {
+   
+
+     797 
+    { .sType 
+    = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO
+    ,
+   
+
+     798 
+    .pQueuePriorities 
+    = (
+    float 
+    []){ 
+    1.0f 
+    },
+   
+
+     799 
+    .queueCount 
+    = 
+    1
+    , },
+   
+
+     800 
+    { .sType 
+    = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO
+    ,
+   
+
+     801 
+    .pQueuePriorities 
+    = (
+    float 
+    []){ 
+    1.0f 
+    },
+   
+
+     802 
+    .queueCount 
+    = 
+    1
+    , },
+   
+
+     803 
+    { .sType 
+    = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO
+    ,
+   
+
+     804 
+    .pQueuePriorities 
+    = (
+    float 
+    []){ 
+    1.0f 
+    },
+   
+
+     805 
+    .queueCount 
+    = 
+    1
+    , },
+   
+
+     806 
+    };
+   
+
+     807 
+   
+
+     808 VkDeviceCreateInfo dev_info 
+    = {
+   
+
+     809 
+    .sType 
+    = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO
+    ,
+   
+
+     810 
+    .pQueueCreateInfos 
+    = queue_create_info
+    ,
+   
+
+     811 
+    .queueCreateInfoCount 
+    = 
+    0
+    ,
+   
+
+     812 
+    };
+   
+
+     813 
+   
+
+     814 ctx
+    ->free 
+    = vulkan_device_free
+    ;
+   
+
+     815 
+   
+
+     816 
+    /* Create an instance if not given one */
+   
+
+     817 
+    if 
+    ((err 
+    = 
+    create_instance
+    (ctx
+    , opts
+    )))
+   
+
+     818 
+    goto end
+    ;
+   
+
+     819 
+   
+
+     820 
+    /* Find a device (if not given one) */
+   
+
+     821 
+    if 
+    ((err 
+    = 
+    find_device
+    (ctx
+    , dev_select
+    )))
+   
+
+     822 
+    goto end
+    ;
+   
+
+     823 
+   
+
+     824 
+    vkGetPhysicalDeviceProperties
+    (hwctx
+    ->phys_dev
+    , &p
+    ->props
+    );
+   
+
+     825 
+    av_log
+    (ctx
+    , AV_LOG_VERBOSE
+    , 
+    "Using device: %s
+    \n
+    "
+    , p
+    ->props
+    .deviceName
+    );
+   
+
+     826 
+    av_log
+    (ctx
+    , AV_LOG_VERBOSE
+    , 
+    "Alignments:
+    \n
+    "
+    );
+   
+
+     827 
+    av_log
+    (ctx
+    , AV_LOG_VERBOSE
+    , 
+    " optimalBufferCopyOffsetAlignment: %li
+    \n
+    "
+    ,
+   
+
+     828 p
+    ->props
+    .limits
+    .optimalBufferCopyOffsetAlignment
+    );
+   
+
+     829 
+    av_log
+    (ctx
+    , AV_LOG_VERBOSE
+    , 
+    " optimalBufferCopyRowPitchAlignment: %li
+    \n
+    "
+    ,
+   
+
+     830 p
+    ->props
+    .limits
+    .optimalBufferCopyRowPitchAlignment
+    );
+   
+
+     831 
+    av_log
+    (ctx
+    , AV_LOG_VERBOSE
+    , 
+    " minMemoryMapAlignment: %li
+    \n
+    "
+    ,
+   
+
+     832 p
+    ->props
+    .limits
+    .minMemoryMapAlignment
+    );
+   
+
+     833 
+   
+
+     834 
+    /* Search queue family */
+   
+
+     835 
+    if 
+    ((err 
+    = 
+    search_queue_families
+    (ctx
+    , &dev_info
+    )))
+   
+
+     836 
+    goto end
+    ;
+   
+
+     837 
+   
+
+     838 
+    if 
+    ((err 
+    = 
+    check_extensions
+    (ctx
+    , 
+    1
+    , opts
+    , &dev_info
+    .ppEnabledExtensionNames
+    ,
+   
+
+     839 
+    &dev_info
+    .enabledExtensionCount
+    , 
+    0
+    )))
+   
+
+     840 
+    goto end
+    ;
+   
+
+     841 
+   
+
+     842 ret 
+    = 
+    vkCreateDevice
+    (hwctx
+    ->phys_dev
+    , &dev_info
+    , hwctx
+    ->alloc
+    ,
+   
+
+     843 
+    &hwctx
+    ->act_dev
+    );
+   
+
+     844 
+   
+
+     845 
+    if 
+    (ret 
+    != VK_SUCCESS
+    ) {
+   
+
+     846 
+    av_log
+    (ctx
+    , AV_LOG_ERROR
+    , 
+    "Device creation failure: %s
+    \n
+    "
+    ,
+   
+
+     847 
+    vk_ret2str
+    (ret
+    ));
+   
+
+     848 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < dev_info
+    .enabledExtensionCount
+    ; i
+    ++)
+   
+
+     849 
+    av_free
+    ((
+    void 
+    *)dev_info
+    .ppEnabledExtensionNames
+    [i
+    ]);
+   
+
+     850 
+    av_free
+    ((
+    void 
+    *)dev_info
+    .ppEnabledExtensionNames
+    );
+   
+
+     851 err 
+    = AVERROR_EXTERNAL
+    ;
+   
+
+     852 
+    goto end
+    ;
+   
+
+     853 
+    }
+   
+
+     854 
+   
+
+     855 
+    /* Tiled images setting, use them by default */
+   
+
+     856 opt_d 
+    = 
+    av_dict_get
+    (opts
+    , 
+    "linear_images"
+    , NULL
+    , 
+    0
+    );
+   
+
+     857 
+    if 
+    (opt_d
+    )
+   
+
+     858 p
+    ->use_linear_images 
+    = 
+    strtol
+    (opt_d
+    ->value
+    , NULL
+    , 
+    10
+    );
+   
+
+     859 
+   
+
+     860 hwctx
+    ->enabled_dev_extensions 
+    = dev_info
+    .ppEnabledExtensionNames
+    ;
+   
+
+     861 hwctx
+    ->nb_enabled_dev_extensions 
+    = dev_info
+    .enabledExtensionCount
+    ;
+   
+
+     862 
+   
+
+     863 end
+    :
+   
+
+     864 
+    return err
+    ;
+   
+
+     865 
+    }
+   
+
+     866 
+   
+
+     867 
+    static int 
+    vulkan_device_init
+    (AVHWDeviceContext 
+    *ctx
+    )
+   
+
+     868 
+    {
+   
+
+     869 
+    int err
+    ;
+   
+
+     870 
+    uint32_t queue_num
+    ;
+   
+
+     871 AVVulkanDeviceContext 
+    *hwctx 
+    = ctx
+    ->hwctx
+    ;
+   
+
+     872 VulkanDevicePriv 
+    *p 
+    = ctx
+    ->internal
+    ->priv
+    ;
+   
+
+     873 
+   
+
+     874 
+    /* Set device extension flags */
+   
+
+     875 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < hwctx
+    ->nb_enabled_dev_extensions
+    ; i
+    ++) {
+   
+
+     876 
+    for 
+    (
+    int j 
+    = 
+    0
+    ; j 
+    < 
+    FF_ARRAY_ELEMS
+    (optional_device_exts
+    ); j
+    ++) {
+   
+
+     877 
+    if 
+    (!
+    strcmp
+    (hwctx
+    ->enabled_dev_extensions
+    [i
+    ],
+   
+
+     878 optional_device_exts
+    [j
+    ].name
+    )) {
+   
+
+     879 p
+    ->extensions 
+    |= optional_device_exts
+    [j
+    ].flag
+    ;
+   
+
+     880 
+    break
+    ;
+   
+
+     881 
+    }
+   
+
+     882 
+    }
+   
+
+     883 
+    }
+   
+
+     884 
+   
+
+     885 
+    vkGetPhysicalDeviceQueueFamilyProperties
+    (hwctx
+    ->phys_dev
+    , &queue_num
+    , NULL
+    );
+   
+
+     886 
+    if 
+    (!queue_num
+    ) {
+   
+
+     887 
+    av_log
+    (ctx
+    , AV_LOG_ERROR
+    , 
+    "Failed to get queues!
+    \n
+    "
+    );
+   
+
+     888 
+    return AVERROR_EXTERNAL
+    ;
+   
+
+     889 
+    }
+   
+
+     890 
+   
+
+     891 
+    #define CHECK_QUEUE(type, n) \
+   
+
+     892 
+    if (n >= queue_num) { \
+   
+
+     893 
+     av_log(ctx, AV_LOG_ERROR, 
+    "Invalid %s queue index %i (device has %i queues)!
+    \n
+    "
+    , \
+   
+
+     894 
+     type, n, queue_num); \
+   
+
+     895 
+     return AVERROR(EINVAL); \
+   
+
+     896 
+    }
+   
+
+     897 
+   
+
+     898 
+    CHECK_QUEUE
+    (
+    "graphics"
+    , hwctx
+    ->queue_family_index
+    )
+   
+
+     899 
+    CHECK_QUEUE
+    (
+    "upload"
+    , hwctx
+    ->queue_family_tx_index
+    )
+   
+
+     900 
+    CHECK_QUEUE
+    (
+    "compute"
+    , hwctx
+    ->queue_family_comp_index
+    )
+   
+
+     901 
+   
+
+     902 
+    #undef CHECK_QUEUE
+   
+
+     903 
+   
+
+     904 p
+    ->qfs
+    [p
+    ->num_qfs
+    ++] = hwctx
+    ->queue_family_index
+    ;
+   
+
+     905 
+    if 
+    ((hwctx
+    ->queue_family_tx_index 
+    != hwctx
+    ->queue_family_index
+    ) &&
+   
+
+     906 
+    (hwctx
+    ->queue_family_tx_index 
+    != hwctx
+    ->queue_family_comp_index
+    ))
+   
+
+     907 p
+    ->qfs
+    [p
+    ->num_qfs
+    ++] = hwctx
+    ->queue_family_tx_index
+    ;
+   
+
+     908 
+    if 
+    ((hwctx
+    ->queue_family_comp_index 
+    != hwctx
+    ->queue_family_index
+    ) &&
+   
+
+     909 
+    (hwctx
+    ->queue_family_comp_index 
+    != hwctx
+    ->queue_family_tx_index
+    ))
+   
+
+     910 p
+    ->qfs
+    [p
+    ->num_qfs
+    ++] = hwctx
+    ->queue_family_comp_index
+    ;
+   
+
+     911 
+   
+
+     912 
+    /* Create exec context - if there's something invalid this will error out */
+   
+
+     913 err 
+    = 
+    create_exec_ctx
+    (ctx
+    , &p
+    ->cmd
+    , hwctx
+    ->queue_family_tx_index
+    );
+   
+
+     914 
+    if 
+    (err
+    )
+   
+
+     915 
+    return err
+    ;
+   
+
+     916 
+   
+
+     917 
+    /* Get device capabilities */
+   
+
+     918 
+    vkGetPhysicalDeviceMemoryProperties
+    (hwctx
+    ->phys_dev
+    , &p
+    ->mprops
+    );
+   
+
+     919 
+   
+
+     920 
+    return 
+    0
+    ;
+   
+
+     921 
+    }
+   
+
+     922 
+   
+
+     923 
+    static int 
+    vulkan_device_create
+    (AVHWDeviceContext 
+    *ctx
+    , 
+    const char 
+    *device
+    ,
+   
+
+     924 AVDictionary 
+    *opts
+    , 
+    int flags
+    )
+   
+
+     925 
+    {
+   
+
+     926 VulkanDeviceSelection dev_select 
+    = { 
+    0 
+    };
+   
+
+     927 
+    if 
+    (device 
+    && device
+    [
+    0
+    ]) {
+   
+
+     928 
+    char 
+    *end 
+    = NULL
+    ;
+   
+
+     929 dev_select
+    .index 
+    = 
+    strtol
+    (device
+    , &end
+    , 
+    10
+    );
+   
+
+     930 
+    if 
+    (end 
+    == device
+    ) {
+   
+
+     931 dev_select
+    .index 
+    = 
+    0
+    ;
+   
+
+     932 dev_select
+    .name 
+    = device
+    ;
+   
+
+     933 
+    }
+   
+
+     934 
+    }
+   
+
+     935 
+   
+
+     936 
+    return 
+    vulkan_device_create_internal
+    (ctx
+    , &dev_select
+    , opts
+    , flags
+    );
+   
+
+     937 
+    }
+   
+
+     938 
+   
+
+     939 
+    static int 
+    vulkan_device_derive
+    (AVHWDeviceContext 
+    *ctx
+    ,
+   
+
+     940 AVHWDeviceContext 
+    *src_ctx
+    , 
+    int flags
+    )
+   
+
+     941 
+    {
+   
+
+     942 av_unused VulkanDeviceSelection dev_select 
+    = { 
+    0 
+    };
+   
+
+     943 
+   
+
+     944 
+    /* If there's only one device on the system, then even if its not covered
+   
+
+     945 
+     * by the following checks (e.g. non-PCIe ARM GPU), having an empty
+   
+
+     946 
+     * dev_select will mean it'll get picked. */
+   
+
+     947 
+    switch
+    (src_ctx
+    ->type
+    ) {
+   
+
+     948 
+    #if CONFIG_LIBDRM
+   
+
+     949 
+    #if CONFIG_VAAPI
+   
+
+     950 
+    case AV_HWDEVICE_TYPE_VAAPI
+    : {
+   
+
+     951 AVVAAPIDeviceContext 
+    *src_hwctx 
+    = src_ctx
+    ->hwctx
+    ;
+   
+
+     952 
+   
+
+     953 
+    const char 
+    *vendor 
+    = 
+    vaQueryVendorString
+    (src_hwctx
+    ->display
+    );
+   
+
+     954 
+    if 
+    (!vendor
+    ) {
+   
+
+     955 
+    av_log
+    (ctx
+    , AV_LOG_ERROR
+    , 
+    "Unable to get device info from VAAPI!
+    \n
+    "
+    );
+   
+
+     956 
+    return AVERROR_EXTERNAL
+    ;
+   
+
+     957 
+    }
+   
+
+     958 
+   
+
+     959 
+    if 
+    (
+    strstr
+    (vendor
+    , 
+    "Intel"
+    ))
+   
+
+     960 dev_select
+    .vendor_id 
+    = 
+    0x8086
+    ;
+   
+
+     961 
+    if 
+    (
+    strstr
+    (vendor
+    , 
+    "AMD"
+    ))
+   
+
+     962 dev_select
+    .vendor_id 
+    = 
+    0x1002
+    ;
+   
+
+     963 
+   
+
+     964 
+    return 
+    vulkan_device_create_internal
+    (ctx
+    , &dev_select
+    , NULL
+    , flags
+    );
+   
+
+     965 
+    }
+   
+
+     966 
+    #endif
+   
+
+     967 
+    case AV_HWDEVICE_TYPE_DRM
+    : {
+   
+
+     968 AVDRMDeviceContext 
+    *src_hwctx 
+    = src_ctx
+    ->hwctx
+    ;
+   
+
+     969 
+   
+
+     970 drmDevice 
+    *drm_dev_info
+    ;
+   
+
+     971 
+    int err 
+    = 
+    drmGetDevice
+    (src_hwctx
+    ->fd
+    , &drm_dev_info
+    );
+   
+
+     972 
+    if 
+    (err
+    ) {
+   
+
+     973 
+    av_log
+    (ctx
+    , AV_LOG_ERROR
+    , 
+    "Unable to get device info from DRM fd!
+    \n
+    "
+    );
+   
+
+     974 
+    return AVERROR_EXTERNAL
+    ;
+   
+
+     975 
+    }
+   
+
+     976 
+   
+
+     977 
+    if 
+    (drm_dev_info
+    ->bustype 
+    == DRM_BUS_PCI
+    )
+   
+
+     978 dev_select
+    .pci_device 
+    = drm_dev_info
+    ->deviceinfo
+    .pci
+    ->device_id
+    ;
+   
+
+     979 
+   
+
+     980 
+    drmFreeDevice
+    (&drm_dev_info
+    );
+   
+
+     981 
+   
+
+     982 
+    return 
+    vulkan_device_create_internal
+    (ctx
+    , &dev_select
+    , NULL
+    , flags
+    );
+   
+
+     983 
+    }
+   
+
+     984 
+    #endif
+   
+
+     985 
+    #if CONFIG_CUDA
+   
+
+     986 
+    case AV_HWDEVICE_TYPE_CUDA
+    : {
+   
+
+     987 AVHWDeviceContext 
+    *cuda_cu 
+    = src_ctx
+    ;
+   
+
+     988 AVCUDADeviceContext 
+    *src_hwctx 
+    = src_ctx
+    ->hwctx
+    ;
+   
+
+     989 AVCUDADeviceContextInternal 
+    *cu_internal 
+    = src_hwctx
+    ->internal
+    ;
+   
+
+     990 CudaFunctions 
+    *cu 
+    = cu_internal
+    ->cuda_dl
+    ;
+   
+
+     991 
+   
+
+     992 
+    int ret 
+    = 
+    CHECK_CU
+    (cu
+    ->
+    cuDeviceGetUuid
+    ((CUuuid 
+    *)&dev_select
+    .uuid
+    ,
+   
+
+     993 cu_internal
+    ->cuda_device
+    ));
+   
+
+     994 
+    if 
+    (ret 
+    < 
+    0
+    ) {
+   
+
+     995 
+    av_log
+    (ctx
+    , AV_LOG_ERROR
+    , 
+    "Unable to get UUID from CUDA!
+    \n
+    "
+    );
+   
+
+     996 
+    return AVERROR_EXTERNAL
+    ;
+   
+
+     997 
+    }
+   
+
+     998 
+   
+
+     999 dev_select
+    .has_uuid 
+    = 
+    1
+    ;
+   
+
+    1000 
+   
+
+    1001 
+    return 
+    vulkan_device_create_internal
+    (ctx
+    , &dev_select
+    , NULL
+    , flags
+    );
+   
+
+    1002 
+    }
+   
+
+    1003 
+    #endif
+   
+
+    1004 
+    default
+    :
+   
+
+    1005 
+    return 
+    AVERROR
+    (ENOSYS
+    );
+   
+
+    1006 
+    }
+   
+
+    1007 
+    }
+   
+
+    1008 
+   
+
+    1009 
+    static int 
+    vulkan_frames_get_constraints
+    (AVHWDeviceContext 
+    *ctx
+    ,
+   
+
+    1010 
+    const void 
+    *hwconfig
+    ,
+   
+
+    1011 AVHWFramesConstraints 
+    *constraints
+    )
+   
+
+    1012 
+    {
+   
+
+    1013 
+    int count 
+    = 
+    0
+    ;
+   
+
+    1014 AVVulkanDeviceContext 
+    *hwctx 
+    = ctx
+    ->hwctx
+    ;
+   
+
+    1015 VulkanDevicePriv 
+    *p 
+    = ctx
+    ->internal
+    ->priv
+    ;
+   
+
+    1016 
+   
+
+    1017 
+    for 
+    (
+    enum AVPixelFormat i 
+    = 
+    0
+    ; i 
+    < AV_PIX_FMT_NB
+    ; i
+    ++)
+   
+
+    1018 count 
+    += 
+    pixfmt_is_supported
+    (hwctx
+    , i
+    , p
+    ->use_linear_images
+    );
+   
+
+    1019 
+   
+
+    1020 
+    #if CONFIG_CUDA
+   
+
+    1021 
+    if 
+    (p
+    ->dev_is_nvidia
+    )
+   
+
+    1022 count
+    ++;
+   
+
+    1023 
+    #endif
+   
+
+    1024 
+   
+
+    1025 constraints
+    ->valid_sw_formats 
+    = 
+    av_malloc_array
+    (count 
+    + 
+    1
+    ,
+   
+
+    1026 
+    sizeof
+    (
+    enum AVPixelFormat
+    ));
+   
+
+    1027 
+    if 
+    (!constraints
+    ->valid_sw_formats
+    )
+   
+
+    1028 
+    return 
+    AVERROR
+    (ENOMEM
+    );
+   
+
+    1029 
+   
+
+    1030 count 
+    = 
+    0
+    ;
+   
+
+    1031 
+    for 
+    (
+    enum AVPixelFormat i 
+    = 
+    0
+    ; i 
+    < AV_PIX_FMT_NB
+    ; i
+    ++)
+   
+
+    1032 
+    if 
+    (
+    pixfmt_is_supported
+    (hwctx
+    , i
+    , p
+    ->use_linear_images
+    ))
+   
+
+    1033 constraints
+    ->valid_sw_formats
+    [count
+    ++] = i
+    ;
+   
+
+    1034 
+   
+
+    1035 
+    #if CONFIG_CUDA
+   
+
+    1036 
+    if 
+    (p
+    ->dev_is_nvidia
+    )
+   
+
+    1037 constraints
+    ->valid_sw_formats
+    [count
+    ++] = AV_PIX_FMT_CUDA
+    ;
+   
+
+    1038 
+    #endif
+   
+
+    1039 constraints
+    ->valid_sw_formats
+    [count
+    ++] = AV_PIX_FMT_NONE
+    ;
+   
+
+    1040 
+   
+
+    1041 constraints
+    ->min_width 
+    = 
+    0
+    ;
+   
+
+    1042 constraints
+    ->min_height 
+    = 
+    0
+    ;
+   
+
+    1043 constraints
+    ->max_width 
+    = p
+    ->props
+    .limits
+    .maxImageDimension2D
+    ;
+   
+
+    1044 constraints
+    ->max_height 
+    = p
+    ->props
+    .limits
+    .maxImageDimension2D
+    ;
+   
+
+    1045 
+   
+
+    1046 constraints
+    ->valid_hw_formats 
+    = 
+    av_malloc_array
+    (
+    2
+    , 
+    sizeof
+    (
+    enum AVPixelFormat
+    ));
+   
+
+    1047 
+    if 
+    (!constraints
+    ->valid_hw_formats
+    )
+   
+
+    1048 
+    return 
+    AVERROR
+    (ENOMEM
+    );
+   
+
+    1049 
+   
+
+    1050 constraints
+    ->valid_hw_formats
+    [
+    0
+    ] = AV_PIX_FMT_VULKAN
+    ;
+   
+
+    1051 constraints
+    ->valid_hw_formats
+    [
+    1
+    ] = AV_PIX_FMT_NONE
+    ;
+   
+
+    1052 
+   
+
+    1053 
+    return 
+    0
+    ;
+   
+
+    1054 
+    }
+   
+
+    1055 
+   
+
+    1056 
+    static int 
+    alloc_mem
+    (AVHWDeviceContext 
+    *ctx
+    , VkMemoryRequirements 
+    *req
+    ,
+   
+
+    1057 VkMemoryPropertyFlagBits req_flags
+    , 
+    void 
+    *alloc_extension
+    ,
+   
+
+    1058 VkMemoryPropertyFlagBits 
+    *mem_flags
+    , VkDeviceMemory 
+    *mem
+    )
+   
+
+    1059 
+    {
+   
+
+    1060 VkResult ret
+    ;
+   
+
+    1061 
+    int index 
+    = -
+    1
+    ;
+   
+
+    1062 VulkanDevicePriv 
+    *p 
+    = ctx
+    ->internal
+    ->priv
+    ;
+   
+
+    1063 AVVulkanDeviceContext 
+    *dev_hwctx 
+    = ctx
+    ->hwctx
+    ;
+   
+
+    1064 VkMemoryAllocateInfo alloc_info 
+    = {
+   
+
+    1065 
+    .sType 
+    = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
+    ,
+   
+
+    1066 
+    .pNext 
+    = alloc_extension
+    ,
+   
+
+    1067 
+    };
+   
+
+    1068 
+   
+
+    1069 
+    /* Align if we need to */
+   
+
+    1070 
+    if 
+    (req_flags 
+    & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+    )
+   
+
+    1071 req
+    ->size 
+    = 
+    FFALIGN
+    (req
+    ->size
+    , p
+    ->props
+    .limits
+    .minMemoryMapAlignment
+    );
+   
+
+    1072 
+   
+
+    1073 alloc_info
+    .allocationSize 
+    = req
+    ->size
+    ;
+   
+
+    1074 
+   
+
+    1075 
+    /* The vulkan spec requires memory types to be sorted in the "optimal"
+   
+
+    1076 
+     * order, so the first matching type we find will be the best/fastest one */
+   
+
+    1077 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < p
+    ->mprops
+    .memoryTypeCount
+    ; i
+    ++) {
+   
+
+    1078 
+    /* The memory type must be supported by the requirements (bitfield) */
+   
+
+    1079 
+    if 
+    (!(req
+    ->memoryTypeBits 
+    & (
+    1 
+    << i
+    )))
+   
+
+    1080 
+    continue
+    ;
+   
+
+    1081 
+   
+
+    1082 
+    /* The memory type flags must include our properties */
+   
+
+    1083 
+    if 
+    ((p
+    ->mprops
+    .memoryTypes
+    [i
+    ].propertyFlags 
+    & req_flags
+    ) != req_flags
+    )
+   
+
+    1084 
+    continue
+    ;
+   
+
+    1085 
+   
+
+    1086 
+    /* Found a suitable memory type */
+   
+
+    1087 index 
+    = i
+    ;
+   
+
+    1088 
+    break
+    ;
+   
+
+    1089 
+    }
+   
+
+    1090 
+   
+
+    1091 
+    if 
+    (index 
+    < 
+    0
+    ) {
+   
+
+    1092 
+    av_log
+    (ctx
+    , AV_LOG_ERROR
+    , 
+    "No memory type found for flags 0x%x
+    \n
+    "
+    ,
+   
+
+    1093 req_flags
+    );
+   
+
+    1094 
+    return 
+    AVERROR
+    (EINVAL
+    );
+   
+
+    1095 
+    }
+   
+
+    1096 
+   
+
+    1097 alloc_info
+    .memoryTypeIndex 
+    = index
+    ;
+   
+
+    1098 
+   
+
+    1099 ret 
+    = 
+    vkAllocateMemory
+    (dev_hwctx
+    ->act_dev
+    , &alloc_info
+    ,
+   
+
+    1100 dev_hwctx
+    ->alloc
+    , mem
+    );
+   
+
+    1101 
+    if 
+    (ret 
+    != VK_SUCCESS
+    ) {
+   
+
+    1102 
+    av_log
+    (ctx
+    , AV_LOG_ERROR
+    , 
+    "Failed to allocate memory: %s
+    \n
+    "
+    ,
+   
+
+    1103 
+    vk_ret2str
+    (ret
+    ));
+   
+
+    1104 
+    return 
+    AVERROR
+    (ENOMEM
+    );
+   
+
+    1105 
+    }
+   
+
+    1106 
+   
+
+    1107 
+    *mem_flags 
+    |= p
+    ->mprops
+    .memoryTypes
+    [index
+    ].propertyFlags
+    ;
+   
+
+    1108 
+   
+
+    1109 
+    return 
+    0
+    ;
+   
+
+    1110 
+    }
+   
+
+    1111 
+   
+
+    1112 
+    static void 
+    vulkan_free_internal
+    (AVVkFrameInternal 
+    *internal
+    )
+   
+
+    1113 
+    {
+   
+
+    1114 
+    if 
+    (!internal
+    )
+   
+
+    1115 
+    return
+    ;
+   
+
+    1116 
+   
+
+    1117 
+    #if CONFIG_CUDA
+   
+
+    1118 
+    if 
+    (internal
+    ->cuda_fc_ref
+    ) {
+   
+
+    1119 AVHWFramesContext 
+    *cuda_fc 
+    = (AVHWFramesContext 
+    *)internal
+    ->cuda_fc_ref
+    ->data
+    ;
+   
+
+    1120 
+    int planes 
+    = 
+    av_pix_fmt_count_planes
+    (cuda_fc
+    ->sw_format
+    );
+   
+
+    1121 AVHWDeviceContext 
+    *cuda_cu 
+    = cuda_fc
+    ->device_ctx
+    ;
+   
+
+    1122 AVCUDADeviceContext 
+    *cuda_dev 
+    = cuda_cu
+    ->hwctx
+    ;
+   
+
+    1123 AVCUDADeviceContextInternal 
+    *cu_internal 
+    = cuda_dev
+    ->internal
+    ;
+   
+
+    1124 CudaFunctions 
+    *cu 
+    = cu_internal
+    ->cuda_dl
+    ;
+   
+
+    1125 
+   
+
+    1126 
+    if 
+    (internal
+    ->cu_sem
+    )
+   
+
+    1127 
+    CHECK_CU
+    (cu
+    ->
+    cuDestroyExternalSemaphore
+    (internal
+    ->cu_sem
+    ));
+   
+
+    1128 
+   
+
+    1129 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < planes
+    ; i
+    ++) {
+   
+
+    1130 
+    if 
+    (internal
+    ->cu_mma
+    [i
+    ])
+   
+
+    1131 
+    CHECK_CU
+    (cu
+    ->
+    cuMipmappedArrayDestroy
+    (internal
+    ->cu_mma
+    [i
+    ]));
+   
+
+    1132 
+    if 
+    (internal
+    ->ext_mem
+    [i
+    ])
+   
+
+    1133 
+    CHECK_CU
+    (cu
+    ->
+    cuDestroyExternalMemory
+    (internal
+    ->ext_mem
+    [i
+    ]));
+   
+
+    1134 
+    }
+   
+
+    1135 
+   
+
+    1136 
+    av_buffer_unref
+    (&internal
+    ->cuda_fc_ref
+    );
+   
+
+    1137 
+    }
+   
+
+    1138 
+    #endif
+   
+
+    1139 
+   
+
+    1140 
+    av_free
+    (internal
+    );
+   
+
+    1141 
+    }
+   
+
+    1142 
+   
+
+    1143 
+    static void 
+    vulkan_frame_free
+    (
+    void 
+    *opaque
+    , 
+    uint8_t 
+    *data
+    )
+   
+
+    1144 
+    {
+   
+
+    1145 AVVkFrame 
+    *f 
+    = (AVVkFrame 
+    *)data
+    ;
+   
+
+    1146 AVHWFramesContext 
+    *hwfc 
+    = opaque
+    ;
+   
+
+    1147 AVVulkanDeviceContext 
+    *hwctx 
+    = hwfc
+    ->device_ctx
+    ->hwctx
+    ;
+   
+
+    1148 
+    int planes 
+    = 
+    av_pix_fmt_count_planes
+    (hwfc
+    ->sw_format
+    );
+   
+
+    1149 
+   
+
+    1150 
+    vulkan_free_internal
+    (f
+    ->internal
+    );
+   
+
+    1151 
+   
+
+    1152 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < planes
+    ; i
+    ++) {
+   
+
+    1153 
+    vkDestroyImage
+    (hwctx
+    ->act_dev
+    , f
+    ->img
+    [i
+    ], hwctx
+    ->alloc
+    );
+   
+
+    1154 
+    vkFreeMemory
+    (hwctx
+    ->act_dev
+    , f
+    ->mem
+    [i
+    ], hwctx
+    ->alloc
+    );
+   
+
+    1155 
+    }
+   
+
+    1156 
+   
+
+    1157 
+    vkDestroySemaphore
+    (hwctx
+    ->act_dev
+    , f
+    ->sem
+    , hwctx
+    ->alloc
+    );
+   
+
+    1158 
+   
+
+    1159 
+    av_free
+    (f
+    );
+   
+
+    1160 
+    }
+   
+
+    1161 
+   
+
+    1162 
+    static int 
+    alloc_bind_mem
+    (AVHWFramesContext 
+    *hwfc
+    , AVVkFrame 
+    *f
+    ,
+   
+
+    1163 
+    void 
+    *alloc_pnext
+    , 
+    size_t alloc_pnext_stride
+    )
+   
+
+    1164 
+    {
+   
+
+    1165 
+    int err
+    ;
+   
+
+    1166 VkResult ret
+    ;
+   
+
+    1167 AVHWDeviceContext 
+    *ctx 
+    = hwfc
+    ->device_ctx
+    ;
+   
+
+    1168 
+    const int planes 
+    = 
+    av_pix_fmt_count_planes
+    (hwfc
+    ->sw_format
+    );
+   
+
+    1169 VkBindImageMemoryInfo bind_info
+    [AV_NUM_DATA_POINTERS
+    ] = { { 
+    0 
+    } };
+   
+
+    1170 
+   
+
+    1171 AVVulkanDeviceContext 
+    *hwctx 
+    = ctx
+    ->hwctx
+    ;
+   
+
+    1172 
+   
+
+    1173 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < planes
+    ; i
+    ++) {
+   
+
+    1174 
+    int use_ded_mem
+    ;
+   
+
+    1175 VkImageMemoryRequirementsInfo2 req_desc 
+    = {
+   
+
+    1176 
+    .sType 
+    = VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2
+    ,
+   
+
+    1177 
+    .image 
+    = f
+    ->img
+    [i
+    ],
+   
+
+    1178 
+    };
+   
+
+    1179 VkMemoryDedicatedAllocateInfo ded_alloc 
+    = {
+   
+
+    1180 
+    .sType 
+    = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO
+    ,
+   
+
+    1181 
+    .pNext 
+    = (
+    void 
+    *)(((
+    uint8_t 
+    *)alloc_pnext
+    ) + i
+    *alloc_pnext_stride
+    ),
+   
+
+    1182 
+    };
+   
+
+    1183 VkMemoryDedicatedRequirements ded_req 
+    = {
+   
+
+    1184 
+    .sType 
+    = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS
+    ,
+   
+
+    1185 
+    };
+   
+
+    1186 VkMemoryRequirements2 req 
+    = {
+   
+
+    1187 
+    .sType 
+    = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2
+    ,
+   
+
+    1188 
+    .pNext 
+    = &ded_req
+    ,
+   
+
+    1189 
+    };
+   
+
+    1190 
+   
+
+    1191 
+    vkGetImageMemoryRequirements2
+    (hwctx
+    ->act_dev
+    , &req_desc
+    , &req
+    );
+   
+
+    1192 
+   
+
+    1193 
+    /* In case the implementation prefers/requires dedicated allocation */
+   
+
+    1194 use_ded_mem 
+    = ded_req
+    .prefersDedicatedAllocation 
+    |
+   
+
+    1195 ded_req
+    .requiresDedicatedAllocation
+    ;
+   
+
+    1196 
+    if 
+    (use_ded_mem
+    )
+   
+
+    1197 ded_alloc
+    .image 
+    = f
+    ->img
+    [i
+    ];
+   
+
+    1198 
+   
+
+    1199 
+    /* Allocate memory */
+   
+
+    1200 
+    if 
+    ((err 
+    = 
+    alloc_mem
+    (ctx
+    , &req
+    .memoryRequirements
+    ,
+   
+
+    1201 f
+    ->tiling 
+    == VK_IMAGE_TILING_LINEAR 
+    ?
+   
+
+    1202 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT 
+    :
+   
+
+    1203 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    ,
+   
+
+    1204 use_ded_mem 
+    ? &ded_alloc 
+    : (
+    void 
+    *)ded_alloc
+    .pNext
+    ,
+   
+
+    1205 
+    &f
+    ->flags
+    , &f
+    ->mem
+    [i
+    ])))
+   
+
+    1206 
+    return err
+    ;
+   
+
+    1207 
+   
+
+    1208 f
+    ->size
+    [i
+    ] = req
+    .memoryRequirements
+    .size
+    ;
+   
+
+    1209 bind_info
+    [i
+    ].sType 
+    = VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_INFO
+    ;
+   
+
+    1210 bind_info
+    [i
+    ].image 
+    = f
+    ->img
+    [i
+    ];
+   
+
+    1211 bind_info
+    [i
+    ].memory 
+    = f
+    ->mem
+    [i
+    ];
+   
+
+    1212 
+    }
+   
+
+    1213 
+   
+
+    1214 
+    /* Bind the allocated memory to the images */
+   
+
+    1215 ret 
+    = 
+    vkBindImageMemory2
+    (hwctx
+    ->act_dev
+    , planes
+    , bind_info
+    );
+   
+
+    1216 
+    if 
+    (ret 
+    != VK_SUCCESS
+    ) {
+   
+
+    1217 
+    av_log
+    (ctx
+    , AV_LOG_ERROR
+    , 
+    "Failed to bind memory: %s
+    \n
+    "
+    ,
+   
+
+    1218 
+    vk_ret2str
+    (ret
+    ));
+   
+
+    1219 
+    return AVERROR_EXTERNAL
+    ;
+   
+
+    1220 
+    }
+   
+
+    1221 
+   
+
+    1222 
+    return 
+    0
+    ;
+   
+
+    1223 
+    }
+   
+
+    1224 
+   
+
+    1225 
+    enum PrepMode 
+    {
+   
+
+    1226 PREP_MODE_WRITE
+    ,
+   
+
+    1227 PREP_MODE_RO_SHADER
+    ,
+   
+
+    1228 
+    };
+   
+
+    1229 
+   
+
+    1230 
+    static int 
+    prepare_frame
+    (AVHWFramesContext 
+    *hwfc
+    , VulkanExecCtx 
+    *ectx
+    ,
+   
+
+    1231 AVVkFrame 
+    *frame
+    , 
+    enum PrepMode pmode
+    )
+   
+
+    1232 
+    {
+   
+
+    1233 VkResult ret
+    ;
+   
+
+    1234 VkImageLayout new_layout
+    ;
+   
+
+    1235 VkAccessFlags new_access
+    ;
+   
+
+    1236 AVHWDeviceContext 
+    *ctx 
+    = hwfc
+    ->device_ctx
+    ;
+   
+
+    1237 AVVulkanDeviceContext 
+    *hwctx 
+    = ctx
+    ->hwctx
+    ;
+   
+
+    1238 
+    const int planes 
+    = 
+    av_pix_fmt_count_planes
+    (hwfc
+    ->sw_format
+    );
+   
+
+    1239 
+   
+
+    1240 VkImageMemoryBarrier img_bar
+    [AV_NUM_DATA_POINTERS
+    ] = { 
+    0 
+    };
+   
+
+    1241 
+   
+
+    1242 VkCommandBufferBeginInfo cmd_start 
+    = {
+   
+
+    1243 
+    .sType 
+    = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
+    ,
+   
+
+    1244 
+    .flags 
+    = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+    ,
+   
+
+    1245 
+    };
+   
+
+    1246 
+   
+
+    1247 VkSubmitInfo s_info 
+    = {
+   
+
+    1248 
+    .sType 
+    = VK_STRUCTURE_TYPE_SUBMIT_INFO
+    ,
+   
+
+    1249 
+    .commandBufferCount 
+    = 
+    1
+    ,
+   
+
+    1250 
+    .pCommandBuffers 
+    = &ectx
+    ->buf
+    ,
+   
+
+    1251 
+   
+
+    1252 
+    .pSignalSemaphores 
+    = &frame
+    ->sem
+    ,
+   
+
+    1253 
+    .signalSemaphoreCount 
+    = 
+    1
+    ,
+   
+
+    1254 
+    };
+   
+
+    1255 
+   
+
+    1256 
+    switch 
+    (pmode
+    ) {
+   
+
+    1257 
+    case PREP_MODE_WRITE
+    :
+   
+
+    1258 new_layout 
+    = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+    ;
+   
+
+    1259 new_access 
+    = VK_ACCESS_TRANSFER_WRITE_BIT
+    ;
+   
+
+    1260 
+    break
+    ;
+   
+
+    1261 
+    case PREP_MODE_RO_SHADER
+    :
+   
+
+    1262 new_layout 
+    = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+    ;
+   
+
+    1263 new_access 
+    = VK_ACCESS_TRANSFER_READ_BIT
+    ;
+   
+
+    1264 
+    break
+    ;
+   
+
+    1265 
+    }
+   
+
+    1266 
+   
+
+    1267 ret 
+    = 
+    vkBeginCommandBuffer
+    (ectx
+    ->buf
+    , &cmd_start
+    );
+   
+
+    1268 
+    if 
+    (ret 
+    != VK_SUCCESS
+    )
+   
+
+    1269 
+    return AVERROR_EXTERNAL
+    ;
+   
+
+    1270 
+   
+
+    1271 
+    /* Change the image layout to something more optimal for writes.
+   
+
+    1272 
+     * This also signals the newly created semaphore, making it usable
+   
+
+    1273 
+     * for synchronization */
+   
+
+    1274 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < planes
+    ; i
+    ++) {
+   
+
+    1275 img_bar
+    [i
+    ].sType 
+    = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+    ;
+   
+
+    1276 img_bar
+    [i
+    ].srcAccessMask 
+    = 
+    0x0
+    ;
+   
+
+    1277 img_bar
+    [i
+    ].dstAccessMask 
+    = new_access
+    ;
+   
+
+    1278 img_bar
+    [i
+    ].oldLayout 
+    = frame
+    ->layout
+    [i
+    ];
+   
+
+    1279 img_bar
+    [i
+    ].newLayout 
+    = new_layout
+    ;
+   
+
+    1280 img_bar
+    [i
+    ].srcQueueFamilyIndex 
+    = VK_QUEUE_FAMILY_IGNORED
+    ;
+   
+
+    1281 img_bar
+    [i
+    ].dstQueueFamilyIndex 
+    = VK_QUEUE_FAMILY_IGNORED
+    ;
+   
+
+    1282 img_bar
+    [i
+    ].image 
+    = frame
+    ->img
+    [i
+    ];
+   
+
+    1283 img_bar
+    [i
+    ].subresourceRange
+    .levelCount 
+    = 
+    1
+    ;
+   
+
+    1284 img_bar
+    [i
+    ].subresourceRange
+    .layerCount 
+    = 
+    1
+    ;
+   
+
+    1285 img_bar
+    [i
+    ].subresourceRange
+    .aspectMask 
+    = VK_IMAGE_ASPECT_COLOR_BIT
+    ;
+   
+
+    1286 
+   
+
+    1287 frame
+    ->layout
+    [i
+    ] = img_bar
+    [i
+    ].newLayout
+    ;
+   
+
+    1288 frame
+    ->access
+    [i
+    ] = img_bar
+    [i
+    ].dstAccessMask
+    ;
+   
+
+    1289 
+    }
+   
+
+    1290 
+   
+
+    1291 
+    vkCmdPipelineBarrier
+    (ectx
+    ->buf
+    , VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT
+    ,
+   
+
+    1292 VK_PIPELINE_STAGE_TRANSFER_BIT
+    , 
+    0
+    ,
+   
+
+    1293 
+    0
+    , NULL
+    , 
+    0
+    , NULL
+    , planes
+    , img_bar
+    );
+   
+
+    1294 
+   
+
+    1295 ret 
+    = 
+    vkEndCommandBuffer
+    (ectx
+    ->buf
+    );
+   
+
+    1296 
+    if 
+    (ret 
+    != VK_SUCCESS
+    )
+   
+
+    1297 
+    return AVERROR_EXTERNAL
+    ;
+   
+
+    1298 
+   
+
+    1299 ret 
+    = 
+    vkQueueSubmit
+    (ectx
+    ->queue
+    , 
+    1
+    , &s_info
+    , ectx
+    ->fence
+    );
+   
+
+    1300 
+    if 
+    (ret 
+    != VK_SUCCESS
+    ) {
+   
+
+    1301 
+    return AVERROR_EXTERNAL
+    ;
+   
+
+    1302 
+    } 
+    else 
+    {
+   
+
+    1303 
+    vkWaitForFences
+    (hwctx
+    ->act_dev
+    , 
+    1
+    , &ectx
+    ->fence
+    , VK_TRUE
+    , UINT64_MAX
+    );
+   
+
+    1304 
+    vkResetFences
+    (hwctx
+    ->act_dev
+    , 
+    1
+    , &ectx
+    ->fence
+    );
+   
+
+    1305 
+    }
+   
+
+    1306 
+   
+
+    1307 
+    return 
+    0
+    ;
+   
+
+    1308 
+    }
+   
+
+    1309 
+   
+
+    1310 
+    static int 
+    create_frame
+    (AVHWFramesContext 
+    *hwfc
+    , AVVkFrame 
+    **frame
+    ,
+   
+
+    1311 VkImageTiling tiling
+    , VkImageUsageFlagBits usage
+    ,
+   
+
+    1312 
+    void 
+    *create_pnext
+    )
+   
+
+    1313 
+    {
+   
+
+    1314 
+    int err
+    ;
+   
+
+    1315 VkResult ret
+    ;
+   
+
+    1316 AVHWDeviceContext 
+    *ctx 
+    = hwfc
+    ->device_ctx
+    ;
+   
+
+    1317 VulkanDevicePriv 
+    *p 
+    = ctx
+    ->internal
+    ->priv
+    ;
+   
+
+    1318 AVVulkanDeviceContext 
+    *hwctx 
+    = ctx
+    ->hwctx
+    ;
+   
+
+    1319 
+    enum AVPixelFormat format 
+    = hwfc
+    ->sw_format
+    ;
+   
+
+    1320 
+    const VkFormat 
+    *img_fmts 
+    = 
+    av_vkfmt_from_pixfmt
+    (format
+    );
+   
+
+    1321 
+    const int planes 
+    = 
+    av_pix_fmt_count_planes
+    (format
+    );
+   
+
+    1322 
+   
+
+    1323 VkExportSemaphoreCreateInfo ext_sem_info 
+    = {
+   
+
+    1324 
+    .sType 
+    = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO
+    ,
+   
+
+    1325 
+    .handleTypes 
+    = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT
+    ,
+   
+
+    1326 
+    };
+   
+
+    1327 
+   
+
+    1328 VkSemaphoreCreateInfo sem_spawn 
+    = {
+   
+
+    1329 
+    .sType 
+    = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
+    ,
+   
+
+    1330 
+    .pNext 
+    = p
+    ->extensions 
+    & EXT_EXTERNAL_FD_SEM 
+    ? &ext_sem_info 
+    : NULL
+    ,
+   
+
+    1331 
+    };
+   
+
+    1332 
+   
+
+    1333 AVVkFrame 
+    *f 
+    = 
+    av_vk_frame_alloc
+    ();
+   
+
+    1334 
+    if 
+    (!f
+    ) {
+   
+
+    1335 
+    av_log
+    (ctx
+    , AV_LOG_ERROR
+    , 
+    "Unable to allocate memory for AVVkFrame!
+    \n
+    "
+    );
+   
+
+    1336 
+    return 
+    AVERROR
+    (ENOMEM
+    );
+   
+
+    1337 
+    }
+   
+
+    1338 
+   
+
+    1339 
+    /* Create the images */
+   
+
+    1340 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < planes
+    ; i
+    ++) {
+   
+
+    1341 
+    const AVPixFmtDescriptor 
+    *desc 
+    = 
+    av_pix_fmt_desc_get
+    (format
+    );
+   
+
+    1342 
+    int w 
+    = hwfc
+    ->width
+    ;
+   
+
+    1343 
+    int h 
+    = hwfc
+    ->height
+    ;
+   
+
+    1344 
+    const int p_w 
+    = i 
+    > 
+    0 
+    ? 
+    AV_CEIL_RSHIFT
+    (w
+    , desc
+    ->log2_chroma_w
+    ) : w
+    ;
+   
+
+    1345 
+    const int p_h 
+    = i 
+    > 
+    0 
+    ? 
+    AV_CEIL_RSHIFT
+    (h
+    , desc
+    ->log2_chroma_h
+    ) : h
+    ;
+   
+
+    1346 
+   
+
+    1347 VkImageCreateInfo image_create_info 
+    = {
+   
+
+    1348 
+    .sType 
+    = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
+    ,
+   
+
+    1349 
+    .pNext 
+    = create_pnext
+    ,
+   
+
+    1350 
+    .imageType 
+    = VK_IMAGE_TYPE_2D
+    ,
+   
+
+    1351 
+    .format 
+    = img_fmts
+    [i
+    ],
+   
+
+    1352 
+    .extent
+    .width 
+    = p_w
+    ,
+   
+
+    1353 
+    .extent
+    .height 
+    = p_h
+    ,
+   
+
+    1354 
+    .extent
+    .depth 
+    = 
+    1
+    ,
+   
+
+    1355 
+    .mipLevels 
+    = 
+    1
+    ,
+   
+
+    1356 
+    .arrayLayers 
+    = 
+    1
+    ,
+   
+
+    1357 
+    .flags 
+    = VK_IMAGE_CREATE_ALIAS_BIT
+    ,
+   
+
+    1358 
+    .tiling 
+    = tiling
+    ,
+   
+
+    1359 
+    .initialLayout 
+    = VK_IMAGE_LAYOUT_UNDEFINED
+    ,
+   
+
+    1360 
+    .usage 
+    = usage
+    ,
+   
+
+    1361 
+    .samples 
+    = VK_SAMPLE_COUNT_1_BIT
+    ,
+   
+
+    1362 
+    .pQueueFamilyIndices 
+    = p
+    ->qfs
+    ,
+   
+
+    1363 
+    .queueFamilyIndexCount 
+    = p
+    ->num_qfs
+    ,
+   
+
+    1364 
+    .sharingMode 
+    = p
+    ->num_qfs 
+    > 
+    1 
+    ? VK_SHARING_MODE_CONCURRENT 
+    :
+   
+
+    1365 VK_SHARING_MODE_EXCLUSIVE
+    ,
+   
+
+    1366 
+    };
+   
+
+    1367 
+   
+
+    1368 ret 
+    = 
+    vkCreateImage
+    (hwctx
+    ->act_dev
+    , &image_create_info
+    ,
+   
+
+    1369 hwctx
+    ->alloc
+    , &f
+    ->img
+    [i
+    ]);
+   
+
+    1370 
+    if 
+    (ret 
+    != VK_SUCCESS
+    ) {
+   
+
+    1371 
+    av_log
+    (ctx
+    , AV_LOG_ERROR
+    , 
+    "Image creation failure: %s
+    \n
+    "
+    ,
+   
+
+    1372 
+    vk_ret2str
+    (ret
+    ));
+   
+
+    1373 err 
+    = 
+    AVERROR
+    (EINVAL
+    );
+   
+
+    1374 
+    goto fail
+    ;
+   
+
+    1375 
+    }
+   
+
+    1376 
+   
+
+    1377 f
+    ->layout
+    [i
+    ] = image_create_info
+    .initialLayout
+    ;
+   
+
+    1378 f
+    ->access
+    [i
+    ] = 
+    0x0
+    ;
+   
+
+    1379 
+    }
+   
+
+    1380 
+   
+
+    1381 
+    /* Create semaphore */
+   
+
+    1382 ret 
+    = 
+    vkCreateSemaphore
+    (hwctx
+    ->act_dev
+    , &sem_spawn
+    ,
+   
+
+    1383 hwctx
+    ->alloc
+    , &f
+    ->sem
+    );
+   
+
+    1384 
+    if 
+    (ret 
+    != VK_SUCCESS
+    ) {
+   
+
+    1385 
+    av_log
+    (hwctx
+    , AV_LOG_ERROR
+    , 
+    "Failed to create semaphore: %s
+    \n
+    "
+    ,
+   
+
+    1386 
+    vk_ret2str
+    (ret
+    ));
+   
+
+    1387 
+    return AVERROR_EXTERNAL
+    ;
+   
+
+    1388 
+    }
+   
+
+    1389 
+   
+
+    1390 f
+    ->flags 
+    = 
+    0x0
+    ;
+   
+
+    1391 f
+    ->tiling 
+    = tiling
+    ;
+   
+
+    1392 
+   
+
+    1393 
+    *frame 
+    = f
+    ;
+   
+
+    1394 
+    return 
+    0
+    ;
+   
+
+    1395 
+   
+
+    1396 fail
+    :
+   
+
+    1397 
+    vulkan_frame_free
+    (hwfc
+    , (
+    uint8_t 
+    *)f
+    );
+   
+
+    1398 
+    return err
+    ;
+   
+
+    1399 
+    }
+   
+
+    1400 
+   
+
+    1401 
+    /* Checks if an export flag is enabled, and if it is ORs it with *iexp */
+   
+
+    1402 
+    static void 
+    try_export_flags
+    (AVHWFramesContext 
+    *hwfc
+    ,
+   
+
+    1403 VkExternalMemoryHandleTypeFlags 
+    *comp_handle_types
+    ,
+   
+
+    1404 VkExternalMemoryHandleTypeFlagBits 
+    *iexp
+    ,
+   
+
+    1405 VkExternalMemoryHandleTypeFlagBits exp
+    )
+   
+
+    1406 
+    {
+   
+
+    1407 VkResult ret
+    ;
+   
+
+    1408 AVVulkanFramesContext 
+    *hwctx 
+    = hwfc
+    ->hwctx
+    ;
+   
+
+    1409 AVVulkanDeviceContext 
+    *dev_hwctx 
+    = hwfc
+    ->device_ctx
+    ->hwctx
+    ;
+   
+
+    1410 VkExternalImageFormatProperties eprops 
+    = {
+   
+
+    1411 
+    .sType 
+    = VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES_KHR
+    ,
+   
+
+    1412 
+    };
+   
+
+    1413 VkImageFormatProperties2 props 
+    = {
+   
+
+    1414 
+    .sType 
+    = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2
+    ,
+   
+
+    1415 
+    .pNext 
+    = &eprops
+    ,
+   
+
+    1416 
+    };
+   
+
+    1417 VkPhysicalDeviceExternalImageFormatInfo enext 
+    = {
+   
+
+    1418 
+    .sType 
+    = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO
+    ,
+   
+
+    1419 
+    .handleType 
+    = exp
+    ,
+   
+
+    1420 
+    };
+   
+
+    1421 VkPhysicalDeviceImageFormatInfo2 pinfo 
+    = {
+   
+
+    1422 
+    .sType 
+    = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2
+    ,
+   
+
+    1423 
+    .pNext 
+    = !exp 
+    ? NULL 
+    : &enext
+    ,
+   
+
+    1424 
+    .format 
+    = 
+    av_vkfmt_from_pixfmt
+    (hwfc
+    ->sw_format
+    )[
+    0
+    ],
+   
+
+    1425 
+    .type 
+    = VK_IMAGE_TYPE_2D
+    ,
+   
+
+    1426 
+    .tiling 
+    = hwctx
+    ->tiling
+    ,
+   
+
+    1427 
+    .usage 
+    = hwctx
+    ->usage
+    ,
+   
+
+    1428 
+    .flags 
+    = VK_IMAGE_CREATE_ALIAS_BIT
+    ,
+   
+
+    1429 
+    };
+   
+
+    1430 
+   
+
+    1431 ret 
+    = 
+    vkGetPhysicalDeviceImageFormatProperties2
+    (dev_hwctx
+    ->phys_dev
+    ,
+   
+
+    1432 
+    &pinfo
+    , &props
+    );
+   
+
+    1433 
+    if 
+    (ret 
+    == VK_SUCCESS
+    ) {
+   
+
+    1434 
+    *iexp 
+    |= exp
+    ;
+   
+
+    1435 
+    *comp_handle_types 
+    |= eprops
+    .externalMemoryProperties
+    .compatibleHandleTypes
+    ;
+   
+
+    1436 
+    }
+   
+
+    1437 
+    }
+   
+
+    1438 
+   
+
+    1439 
+    static AVBufferRef 
+    *
+    vulkan_pool_alloc
+    (
+    void 
+    *opaque
+    , 
+    int size
+    )
+   
+
+    1440 
+    {
+   
+
+    1441 
+    int err
+    ;
+   
+
+    1442 AVVkFrame 
+    *f
+    ;
+   
+
+    1443 AVBufferRef 
+    *avbuf 
+    = NULL
+    ;
+   
+
+    1444 AVHWFramesContext 
+    *hwfc 
+    = opaque
+    ;
+   
+
+    1445 AVVulkanFramesContext 
+    *hwctx 
+    = hwfc
+    ->hwctx
+    ;
+   
+
+    1446 VulkanDevicePriv 
+    *p 
+    = hwfc
+    ->device_ctx
+    ->internal
+    ->priv
+    ;
+   
+
+    1447 VkExportMemoryAllocateInfo eminfo
+    [AV_NUM_DATA_POINTERS
+    ];
+   
+
+    1448 VkExternalMemoryHandleTypeFlags e 
+    = 
+    0x0
+    ;
+   
+
+    1449 
+   
+
+    1450 VkExternalMemoryImageCreateInfo eiinfo 
+    = {
+   
+
+    1451 
+    .sType 
+    = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO
+    ,
+   
+
+    1452 
+    .pNext 
+    = hwctx
+    ->create_pnext
+    ,
+   
+
+    1453 
+    };
+   
+
+    1454 
+   
+
+    1455 
+    if 
+    (p
+    ->extensions 
+    & EXT_EXTERNAL_FD_MEMORY
+    )
+   
+
+    1456 
+    try_export_flags
+    (hwfc
+    , &eiinfo
+    .handleTypes
+    , &e
+    ,
+   
+
+    1457 VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT
+    );
+   
+
+    1458 
+   
+
+    1459 
+    if 
+    (p
+    ->extensions 
+    & EXT_EXTERNAL_DMABUF_MEMORY
+    )
+   
+
+    1460 
+    try_export_flags
+    (hwfc
+    , &eiinfo
+    .handleTypes
+    , &e
+    ,
+   
+
+    1461 VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT
+    );
+   
+
+    1462 
+   
+
+    1463 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < 
+    av_pix_fmt_count_planes
+    (hwfc
+    ->sw_format
+    ); i
+    ++) {
+   
+
+    1464 eminfo
+    [i
+    ].sType 
+    = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO
+    ;
+   
+
+    1465 eminfo
+    [i
+    ].pNext 
+    = hwctx
+    ->alloc_pnext
+    [i
+    ];
+   
+
+    1466 eminfo
+    [i
+    ].handleTypes 
+    = e
+    ;
+   
+
+    1467 
+    }
+   
+
+    1468 
+   
+
+    1469 err 
+    = 
+    create_frame
+    (hwfc
+    , &f
+    , hwctx
+    ->tiling
+    , hwctx
+    ->usage
+    ,
+   
+
+    1470 eiinfo
+    .handleTypes 
+    ? &eiinfo 
+    : NULL
+    );
+   
+
+    1471 
+    if 
+    (err
+    )
+   
+
+    1472 
+    return NULL
+    ;
+   
+
+    1473 
+   
+
+    1474 err 
+    = 
+    alloc_bind_mem
+    (hwfc
+    , f
+    , eminfo
+    , 
+    sizeof
+    (*eminfo
+    ));
+   
+
+    1475 
+    if 
+    (err
+    )
+   
+
+    1476 
+    goto fail
+    ;
+   
+
+    1477 
+   
+
+    1478 err 
+    = 
+    prepare_frame
+    (hwfc
+    , &p
+    ->cmd
+    , f
+    , PREP_MODE_WRITE
+    );
+   
+
+    1479 
+    if 
+    (err
+    )
+   
+
+    1480 
+    goto fail
+    ;
+   
+
+    1481 
+   
+
+    1482 avbuf 
+    = 
+    av_buffer_create
+    ((
+    uint8_t 
+    *)f
+    , 
+    sizeof
+    (AVVkFrame
+    ),
+   
+
+    1483 vulkan_frame_free
+    , hwfc
+    , 
+    0
+    );
+   
+
+    1484 
+    if 
+    (!avbuf
+    )
+   
+
+    1485 
+    goto fail
+    ;
+   
+
+    1486 
+   
+
+    1487 
+    return avbuf
+    ;
+   
+
+    1488 
+   
+
+    1489 fail
+    :
+   
+
+    1490 
+    vulkan_frame_free
+    (hwfc
+    , (
+    uint8_t 
+    *)f
+    );
+   
+
+    1491 
+    return NULL
+    ;
+   
+
+    1492 
+    }
+   
+
+    1493 
+   
+
+    1494 
+    static void 
+    vulkan_frames_uninit
+    (AVHWFramesContext 
+    *hwfc
+    )
+   
+
+    1495 
+    {
+   
+
+    1496 VulkanFramesPriv 
+    *fp 
+    = hwfc
+    ->internal
+    ->priv
+    ;
+   
+
+    1497 
+   
+
+    1498 
+    free_exec_ctx
+    (hwfc
+    ->device_ctx
+    , &fp
+    ->cmd
+    );
+   
+
+    1499 
+    }
+   
+
+    1500 
+   
+
+    1501 
+    static int 
+    vulkan_frames_init
+    (AVHWFramesContext 
+    *hwfc
+    )
+   
+
+    1502 
+    {
+   
+
+    1503 
+    int err
+    ;
+   
+
+    1504 AVVkFrame 
+    *f
+    ;
+   
+
+    1505 AVVulkanFramesContext 
+    *hwctx 
+    = hwfc
+    ->hwctx
+    ;
+   
+
+    1506 VulkanFramesPriv 
+    *fp 
+    = hwfc
+    ->internal
+    ->priv
+    ;
+   
+
+    1507 AVVulkanDeviceContext 
+    *dev_hwctx 
+    = hwfc
+    ->device_ctx
+    ->hwctx
+    ;
+   
+
+    1508 VulkanDevicePriv 
+    *p 
+    = hwfc
+    ->device_ctx
+    ->internal
+    ->priv
+    ;
+   
+
+    1509 
+   
+
+    1510 
+    if 
+    (hwfc
+    ->pool
+    )
+   
+
+    1511 
+    return 
+    0
+    ;
+   
+
+    1512 
+   
+
+    1513 
+    /* Default pool flags */
+   
+
+    1514 hwctx
+    ->tiling 
+    = hwctx
+    ->tiling 
+    ? hwctx
+    ->tiling 
+    : p
+    ->use_linear_images 
+    ?
+   
+
+    1515 VK_IMAGE_TILING_LINEAR 
+    : VK_IMAGE_TILING_OPTIMAL
+    ;
+   
+
+    1516 
+   
+
+    1517 hwctx
+    ->usage 
+    |= DEFAULT_USAGE_FLAGS
+    ;
+   
+
+    1518 
+   
+
+    1519 err 
+    = 
+    create_exec_ctx
+    (hwfc
+    ->device_ctx
+    , &fp
+    ->cmd
+    ,
+   
+
+    1520 dev_hwctx
+    ->queue_family_tx_index
+    );
+   
+
+    1521 
+    if 
+    (err
+    )
+   
+
+    1522 
+    return err
+    ;
+   
+
+    1523 
+   
+
+    1524 
+    /* Test to see if allocation will fail */
+   
+
+    1525 err 
+    = 
+    create_frame
+    (hwfc
+    , &f
+    , hwctx
+    ->tiling
+    , hwctx
+    ->usage
+    ,
+   
+
+    1526 hwctx
+    ->create_pnext
+    );
+   
+
+    1527 
+    if 
+    (err
+    ) {
+   
+
+    1528 
+    free_exec_ctx
+    (hwfc
+    ->device_ctx
+    , &p
+    ->cmd
+    );
+   
+
+    1529 
+    return err
+    ;
+   
+
+    1530 
+    }
+   
+
+    1531 
+   
+
+    1532 
+    vulkan_frame_free
+    (hwfc
+    , (
+    uint8_t 
+    *)f
+    );
+   
+
+    1533 
+   
+
+    1534 hwfc
+    ->internal
+    ->pool_internal 
+    = 
+    av_buffer_pool_init2
+    (
+    sizeof
+    (AVVkFrame
+    ),
+   
+
+    1535 hwfc
+    , vulkan_pool_alloc
+    ,
+   
+
+    1536 NULL
+    );
+   
+
+    1537 
+    if 
+    (!hwfc
+    ->internal
+    ->pool_internal
+    ) {
+   
+
+    1538 
+    free_exec_ctx
+    (hwfc
+    ->device_ctx
+    , &p
+    ->cmd
+    );
+   
+
+    1539 
+    return 
+    AVERROR
+    (ENOMEM
+    );
+   
+
+    1540 
+    }
+   
+
+    1541 
+   
+
+    1542 
+    return 
+    0
+    ;
+   
+
+    1543 
+    }
+   
+
+    1544 
+   
+
+    1545 
+    static int 
+    vulkan_get_buffer
+    (AVHWFramesContext 
+    *hwfc
+    , AVFrame 
+    *frame
+    )
+   
+
+    1546 
+    {
+   
+
+    1547 frame
+    ->buf
+    [
+    0
+    ] = 
+    av_buffer_pool_get
+    (hwfc
+    ->pool
+    );
+   
+
+    1548 
+    if 
+    (!frame
+    ->buf
+    [
+    0
+    ])
+   
+
+    1549 
+    return 
+    AVERROR
+    (ENOMEM
+    );
+   
+
+    1550 
+   
+
+    1551 frame
+    ->data
+    [
+    0
+    ] = frame
+    ->buf
+    [
+    0
+    ]->data
+    ;
+   
+
+    1552 frame
+    ->format 
+    = AV_PIX_FMT_VULKAN
+    ;
+   
+
+    1553 frame
+    ->width 
+    = hwfc
+    ->width
+    ;
+   
+
+    1554 frame
+    ->height 
+    = hwfc
+    ->height
+    ;
+   
+
+    1555 
+   
+
+    1556 
+    return 
+    0
+    ;
+   
+
+    1557 
+    }
+   
+
+    1558 
+   
+
+    1559 
+    static int 
+    vulkan_transfer_get_formats
+    (AVHWFramesContext 
+    *hwfc
+    ,
+   
+
+    1560 
+    enum AVHWFrameTransferDirection dir
+    ,
+   
+
+    1561 
+    enum AVPixelFormat 
+    **formats
+    )
+   
+
+    1562 
+    {
+   
+
+    1563 
+    enum AVPixelFormat 
+    *fmts 
+    = 
+    av_malloc_array
+    (
+    2
+    , 
+    sizeof
+    (*fmts
+    ));
+   
+
+    1564 
+    if 
+    (!fmts
+    )
+   
+
+    1565 
+    return 
+    AVERROR
+    (ENOMEM
+    );
+   
+
+    1566 
+   
+
+    1567 fmts
+    [
+    0
+    ] = hwfc
+    ->sw_format
+    ;
+   
+
+    1568 fmts
+    [
+    1
+    ] = AV_PIX_FMT_NONE
+    ;
+   
+
+    1569 
+   
+
+    1570 
+    *formats 
+    = fmts
+    ;
+   
+
+    1571 
+    return 
+    0
+    ;
+   
+
+    1572 
+    }
+   
+
+    1573 
+   
+
+    1574 
+    typedef 
+    struct VulkanMapping 
+    {
+   
+
+    1575 AVVkFrame 
+    *frame
+    ;
+   
+
+    1576 
+    int flags
+    ;
+   
+
+    1577 
+    } VulkanMapping
+    ;
+   
+
+    1578 
+   
+
+    1579 
+    static void 
+    vulkan_unmap_frame
+    (AVHWFramesContext 
+    *hwfc
+    , HWMapDescriptor 
+    *hwmap
+    )
+   
+
+    1580 
+    {
+   
+
+    1581 VulkanMapping 
+    *map 
+    = hwmap
+    ->priv
+    ;
+   
+
+    1582 AVVulkanDeviceContext 
+    *hwctx 
+    = hwfc
+    ->device_ctx
+    ->hwctx
+    ;
+   
+
+    1583 
+    const int planes 
+    = 
+    av_pix_fmt_count_planes
+    (hwfc
+    ->sw_format
+    );
+   
+
+    1584 
+   
+
+    1585 
+    /* Check if buffer needs flushing */
+   
+
+    1586 
+    if 
+    ((map
+    ->flags 
+    & AV_HWFRAME_MAP_WRITE
+    ) &&
+   
+
+    1587 
+    !(map
+    ->frame
+    ->flags 
+    & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    )) {
+   
+
+    1588 VkResult ret
+    ;
+   
+
+    1589 VkMappedMemoryRange flush_ranges
+    [AV_NUM_DATA_POINTERS
+    ] = { { 
+    0 
+    } };
+   
+
+    1590 
+   
+
+    1591 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < planes
+    ; i
+    ++) {
+   
+
+    1592 flush_ranges
+    [i
+    ].sType 
+    = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE
+    ;
+   
+
+    1593 flush_ranges
+    [i
+    ].memory 
+    = map
+    ->frame
+    ->mem
+    [i
+    ];
+   
+
+    1594 flush_ranges
+    [i
+    ].size 
+    = VK_WHOLE_SIZE
+    ;
+   
+
+    1595 
+    }
+   
+
+    1596 
+   
+
+    1597 ret 
+    = 
+    vkFlushMappedMemoryRanges
+    (hwctx
+    ->act_dev
+    , planes
+    ,
+   
+
+    1598 flush_ranges
+    );
+   
+
+    1599 
+    if 
+    (ret 
+    != VK_SUCCESS
+    ) {
+   
+
+    1600 
+    av_log
+    (hwfc
+    , AV_LOG_ERROR
+    , 
+    "Failed to flush memory: %s
+    \n
+    "
+    ,
+   
+
+    1601 
+    vk_ret2str
+    (ret
+    ));
+   
+
+    1602 
+    }
+   
+
+    1603 
+    }
+   
+
+    1604 
+   
+
+    1605 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < planes
+    ; i
+    ++)
+   
+
+    1606 
+    vkUnmapMemory
+    (hwctx
+    ->act_dev
+    , map
+    ->frame
+    ->mem
+    [i
+    ]);
+   
+
+    1607 
+   
+
+    1608 
+    av_free
+    (map
+    );
+   
+
+    1609 
+    }
+   
+
+    1610 
+   
+
+    1611 
+    static int 
+    vulkan_map_frame_to_mem
+    (AVHWFramesContext 
+    *hwfc
+    , AVFrame 
+    *dst
+    ,
+   
+
+    1612 
+    const AVFrame 
+    *src
+    , 
+    int flags
+    )
+   
+
+    1613 
+    {
+   
+
+    1614 VkResult ret
+    ;
+   
+
+    1615 
+    int err
+    , mapped_mem_count 
+    = 
+    0
+    ;
+   
+
+    1616 AVVkFrame 
+    *f 
+    = (AVVkFrame 
+    *)src
+    ->data
+    [
+    0
+    ];
+   
+
+    1617 AVVulkanDeviceContext 
+    *hwctx 
+    = hwfc
+    ->device_ctx
+    ->hwctx
+    ;
+   
+
+    1618 
+    const int planes 
+    = 
+    av_pix_fmt_count_planes
+    (hwfc
+    ->sw_format
+    );
+   
+
+    1619 
+   
+
+    1620 VulkanMapping 
+    *map 
+    = 
+    av_mallocz
+    (
+    sizeof
+    (VulkanMapping
+    ));
+   
+
+    1621 
+    if 
+    (!map
+    )
+   
+
+    1622 
+    return 
+    AVERROR
+    (EINVAL
+    );
+   
+
+    1623 
+   
+
+    1624 
+    if 
+    (src
+    ->format 
+    != AV_PIX_FMT_VULKAN
+    ) {
+   
+
+    1625 
+    av_log
+    (hwfc
+    , AV_LOG_ERROR
+    , 
+    "Cannot map from pixel format %s!
+    \n
+    "
+    ,
+   
+
+    1626 
+    av_get_pix_fmt_name
+    (src
+    ->format
+    ));
+   
+
+    1627 err 
+    = 
+    AVERROR
+    (EINVAL
+    );
+   
+
+    1628 
+    goto fail
+    ;
+   
+
+    1629 
+    }
+   
+
+    1630 
+   
+
+    1631 
+    if 
+    (!(f
+    ->flags 
+    & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+    ) ||
+   
+
+    1632 
+    !(f
+    ->tiling 
+    == VK_IMAGE_TILING_LINEAR
+    )) {
+   
+
+    1633 
+    av_log
+    (hwfc
+    , AV_LOG_ERROR
+    , 
+    "Unable to map frame, not host visible "
+   
+
+    1634 
+    "and linear!
+    \n
+    "
+    );
+   
+
+    1635 err 
+    = 
+    AVERROR
+    (EINVAL
+    );
+   
+
+    1636 
+    goto fail
+    ;
+   
+
+    1637 
+    }
+   
+
+    1638 
+   
+
+    1639 dst
+    ->width 
+    = src
+    ->width
+    ;
+   
+
+    1640 dst
+    ->height 
+    = src
+    ->height
+    ;
+   
+
+    1641 
+   
+
+    1642 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < planes
+    ; i
+    ++) {
+   
+
+    1643 ret 
+    = 
+    vkMapMemory
+    (hwctx
+    ->act_dev
+    , f
+    ->mem
+    [i
+    ], 
+    0
+    ,
+   
+
+    1644 VK_WHOLE_SIZE
+    , 
+    0
+    , (
+    void 
+    **)&dst
+    ->data
+    [i
+    ]);
+   
+
+    1645 
+    if 
+    (ret 
+    != VK_SUCCESS
+    ) {
+   
+
+    1646 
+    av_log
+    (hwfc
+    , AV_LOG_ERROR
+    , 
+    "Failed to map image memory: %s
+    \n
+    "
+    ,
+   
+
+    1647 
+    vk_ret2str
+    (ret
+    ));
+   
+
+    1648 err 
+    = AVERROR_EXTERNAL
+    ;
+   
+
+    1649 
+    goto fail
+    ;
+   
+
+    1650 
+    }
+   
+
+    1651 mapped_mem_count
+    ++;
+   
+
+    1652 
+    }
+   
+
+    1653 
+   
+
+    1654 
+    /* Check if the memory contents matter */
+   
+
+    1655 
+    if 
+    (((flags 
+    & AV_HWFRAME_MAP_READ
+    ) || !(flags 
+    & AV_HWFRAME_MAP_OVERWRITE
+    )) &&
+   
+
+    1656 
+    !(f
+    ->flags 
+    & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    )) {
+   
+
+    1657 VkMappedMemoryRange map_mem_ranges
+    [AV_NUM_DATA_POINTERS
+    ] = { { 
+    0 
+    } };
+   
+
+    1658 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < planes
+    ; i
+    ++) {
+   
+
+    1659 map_mem_ranges
+    [i
+    ].sType 
+    = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE
+    ;
+   
+
+    1660 map_mem_ranges
+    [i
+    ].size 
+    = VK_WHOLE_SIZE
+    ;
+   
+
+    1661 map_mem_ranges
+    [i
+    ].memory 
+    = f
+    ->mem
+    [i
+    ];
+   
+
+    1662 
+    }
+   
+
+    1663 
+   
+
+    1664 ret 
+    = 
+    vkInvalidateMappedMemoryRanges
+    (hwctx
+    ->act_dev
+    , planes
+    ,
+   
+
+    1665 map_mem_ranges
+    );
+   
+
+    1666 
+    if 
+    (ret 
+    != VK_SUCCESS
+    ) {
+   
+
+    1667 
+    av_log
+    (hwfc
+    , AV_LOG_ERROR
+    , 
+    "Failed to invalidate memory: %s
+    \n
+    "
+    ,
+   
+
+    1668 
+    vk_ret2str
+    (ret
+    ));
+   
+
+    1669 err 
+    = AVERROR_EXTERNAL
+    ;
+   
+
+    1670 
+    goto fail
+    ;
+   
+
+    1671 
+    }
+   
+
+    1672 
+    }
+   
+
+    1673 
+   
+
+    1674 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < planes
+    ; i
+    ++) {
+   
+
+    1675 VkImageSubresource sub 
+    = {
+   
+
+    1676 
+    .aspectMask 
+    = VK_IMAGE_ASPECT_COLOR_BIT
+    ,
+   
+
+    1677 
+    };
+   
+
+    1678 VkSubresourceLayout layout
+    ;
+   
+
+    1679 
+    vkGetImageSubresourceLayout
+    (hwctx
+    ->act_dev
+    , f
+    ->img
+    [i
+    ], &sub
+    , &layout
+    );
+   
+
+    1680 dst
+    ->linesize
+    [i
+    ] = layout
+    .rowPitch
+    ;
+   
+
+    1681 
+    }
+   
+
+    1682 
+   
+
+    1683 map
+    ->frame 
+    = f
+    ;
+   
+
+    1684 map
+    ->flags 
+    = flags
+    ;
+   
+
+    1685 
+   
+
+    1686 err 
+    = 
+    ff_hwframe_map_create
+    (src
+    ->hw_frames_ctx
+    , dst
+    , src
+    ,
+   
+
+    1687 
+    &vulkan_unmap_frame
+    , map
+    );
+   
+
+    1688 
+    if 
+    (err 
+    < 
+    0
+    )
+   
+
+    1689 
+    goto fail
+    ;
+   
+
+    1690 
+   
+
+    1691 
+    return 
+    0
+    ;
+   
+
+    1692 
+   
+
+    1693 fail
+    :
+   
+
+    1694 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < mapped_mem_count
+    ; i
+    ++)
+   
+
+    1695 
+    vkUnmapMemory
+    (hwctx
+    ->act_dev
+    , f
+    ->mem
+    [i
+    ]);
+   
+
+    1696 
+   
+
+    1697 
+    av_free
+    (map
+    );
+   
+
+    1698 
+    return err
+    ;
+   
+
+    1699 
+    }
+   
+
+    1700 
+   
+
+    1701 
+    #if CONFIG_LIBDRM
+   
+
+    1702 
+    static void 
+    vulkan_unmap_from
+    (AVHWFramesContext 
+    *hwfc
+    , HWMapDescriptor 
+    *hwmap
+    )
+   
+
+    1703 
+    {
+   
+
+    1704 VulkanMapping 
+    *map 
+    = hwmap
+    ->priv
+    ;
+   
+
+    1705 AVVulkanDeviceContext 
+    *hwctx 
+    = hwfc
+    ->device_ctx
+    ->hwctx
+    ;
+   
+
+    1706 
+    const int planes 
+    = 
+    av_pix_fmt_count_planes
+    (hwfc
+    ->sw_format
+    );
+   
+
+    1707 
+   
+
+    1708 
+    for 
+    (
+    int i 
+    = 
+    0
+    ; i 
+    < planes
+    ; i
+    ++) {
+   
+
+    1709 
+    vkDestroyImage
+    (hwctx
+    ->act_dev
+    , map
+    ->frame
+    ->img
+    [i
+    ], hwctx
+    ->alloc
+    );
+   
+
+    1710 
+    vkFreeMemory
+    (hwctx
+    ->act_dev
+    , map
+    ->frame
+    ->mem
+    [i
+    ], hwctx
+    ->alloc
+    );
+   
+
+    1711 
+    }
+   
+
+    1712 
+   
+
+    1713 
+    vkDestroySemaphore
+    (hwctx
+    ->act_dev
+    , map
+    ->frame
+    ->sem
+    , hwctx
+    ->alloc
+    );
+   
+
+    1714 
+   
+
+    1715 
+    av_freep
+    (&map
+    ->frame
+    );
+   
+
+    1716 
+    }
+   
+
+    1717 
+   
+
+    1718 
+    static const struct 
+    {
+   
+
+    1719 
+    uint32_t drm_fourcc
+    ;
+   
+
+    1720 VkFormat vk_format
+    ;
+   
+
+    1721 
+    } vulkan_drm_format_map
+    [] = {
+   
+
+    1722 
+    { DRM_FORMAT_R8
+    , VK_FORMAT_R8_UNORM 
+    },
+   
+
+    1723 
+    { DRM_FORMAT_R16
+    , VK_FORMAT_R16_UNORM 
+    },
+   
+
+    1724 
+    { DRM_FORMAT_GR88
+    , VK_FORMAT_R8G8_UNORM 
+    },
+   
+
+    1725 
+    { DRM_FORMAT_RG88
+    , VK_FORMAT_R8G8_UNOR…
